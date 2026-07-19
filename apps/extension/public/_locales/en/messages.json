@@ -4,7 +4,7 @@
     "description": "Extension name shown in the browser UI."
   },
   "extDescription": {
-    "message": "Open-source bilingual web translation. Apache-2.0. Alternative to Immersive Translate / Kiss Translator / FluentRead.",
+    "message": "Open-source bilingual translation product matrix. Apache-2.0, privacy-first, cross-platform.",
     "description": "Extension description shown in the extensions page."
   },
   "commandToggleTranslate": {

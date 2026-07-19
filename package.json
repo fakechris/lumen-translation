@@ -2,7 +2,7 @@
   "name": "lumen-translation",
   "version": "0.1.0",
   "private": true,
-  "description": "Lumen Translation — an MIT/Apache-2.0 open-source bilingual translation product matrix covering FluentRead / Kiss Translator / Immersive Translate.",
+  "description": "Lumen Translation — an Apache-2.0 open-source bilingual translation product matrix (extension, userscript, PopClip, mobile, self-hosted sync).",
   "license": "Apache-2.0",
   "packageManager": "pnpm@10.33.2",
   "type": "module",

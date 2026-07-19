@@ -309,7 +309,7 @@ export default defineContentScript({
         removeFab();
       });
 
-    // Surface an external event API (like Kiss Translator's kiss_translator event).
+    // Surface an external event API so other tools can drive Lumen programmatically.
     window.addEventListener("lumen", ((e: CustomEvent) => {
       const action = e.detail?.action;
       if (action === "toggle_translate") togglePage();

@@ -4,7 +4,7 @@
     "description": "浏览器扩展栏中显示的扩展名称。"
   },
   "extDescription": {
-    "message": "开源双语网页翻译，Apache-2.0。对标沉浸式翻译 / Kiss Translator / FluentRead 的宽松协议替代品。",
+    "message": "开源双语翻译产品矩阵，Apache-2.0，隐私优先，跨平台。",
     "description": "扩展页中显示的描述。"
   },
   "commandToggleTranslate": {
