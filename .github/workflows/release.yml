@@ -1,0 +1,110 @@
+name: Release
+
+# Build all distributable artifacts and attach them to a GitHub Release
+# whenever a tag matching v* is pushed.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install zip CLI (for PopClip package)
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build library packages
+        run: pnpm -r --filter "./packages/**" build
+
+      - name: Build Chrome extension
+        run: pnpm --filter "@lumen/extension" build
+
+      - name: Zip Chrome extension
+        run: pnpm --filter "@lumen/extension" zip
+
+      - name: Build Firefox extension
+        run: pnpm --filter "@lumen/extension" build:firefox
+
+      - name: Zip Firefox extension
+        run: pnpm --filter "@lumen/extension" zip:firefox
+
+      - name: Build userscript
+        run: pnpm --filter "@lumen/userscript" build
+
+      - name: Build PopClip extension (with .popclipextz)
+        run: pnpm --filter "@lumen/popclip" build -- --zip
+
+      - name: Build mobile web bundle
+        run: pnpm --filter "@lumen/mobile" build
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p artifacts
+          cp apps/extension/.output/chrome-mv3.zip artifacts/lumen-chrome.zip
+          cp apps/extension/.output/firefox-mv2.zip artifacts/lumen-firefox.zip
+          cp lumen.user.js artifacts/lumen.user.js
+          cp -r apps/popclip/dist/Lumen.popclipext artifacts/Lumen.popclipext
+          cp apps/popclip/dist/Lumen.popclipextz artifacts/Lumen.popclipextz 2>/dev/null || true
+          tar -czf artifacts/lumen-mobile-web.tar.gz -C apps/mobile dist
+          # Unpacked Chrome folder for sideloading
+          cp -r apps/extension/.output/chrome-mv3 artifacts/lumen-chrome-unpacked
+          ls -la artifacts
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          {
+            echo "# Lumen Translation $TAG"
+            echo ""
+            echo "Apache-2.0 open-source bilingual translation."
+            echo ""
+            echo "## Artifacts"
+            echo "- \`lumen-chrome.zip\` — Chrome/Edge MV3 extension (load via chrome://extensions → developer mode → load unpacked, or use the zip for store upload)"
+            echo "- \`lumen-chrome-unpacked/\` — unpacked Chrome extension for sideloading"
+            echo "- \`lumen-firefox.zip\` — Firefox MV2 extension (about:debugging → This Firefox → Load Temporary Add-on)"
+            echo "- \`lumen.user.js\` — Tampermonkey/Violentmonkey userscript"
+            echo "- \`Lumen.popclipext\` / \`Lumen.popclipextz\` — macOS PopClip extension (double-click .popclipext to install)"
+            echo "- \`lumen-mobile-web.tar.gz\` — Capacitor mobile web bundle (run \`cap add ios/android\` then \`cap sync\`)"
+            echo ""
+            echo "## Quick start"
+            echo "1. Download \`lumen-chrome.zip\`, unzip, load unpacked in chrome://extensions"
+            echo "2. Or download \`lumen.user.js\` and install in Tampermonkey"
+            echo "3. Alt+Q translate page, Alt+S selection, Alt+I input box, Alt+hover paragraph"
+          } > release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Lumen Translation ${{ steps.notes.outputs.tag }}
+          body_path: release-notes.md
+          files: |
+            artifacts/lumen-chrome.zip
+            artifacts/lumen-firefox.zip
+            artifacts/lumen.user.js
+            artifacts/Lumen.popclipextz
+            artifacts/lumen-mobile-web.tar.gz
+            artifacts/lumen-chrome-unpacked/**
+          fail_on_unmatched_files: false

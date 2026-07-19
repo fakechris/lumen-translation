@@ -1,0 +1,85 @@
+{
+  "identifier": "app.lumen.translate",
+  "name": "Lumen",
+  "icon": "icon.png",
+  "entitlements": ["network"],
+  "popclipVersion": 4158,
+  "actions": [
+    {
+      "identifier": "lumen-show",
+      "title": "Lumen",
+      "type": "javascript",
+      "script": "script.js",
+      "requirements": ["text"],
+      "after": "show-result",
+      "stayVisible": false
+    },
+    {
+      "identifier": "lumen-copy",
+      "title": "Lumen Copy",
+      "type": "javascript",
+      "script": "script.js",
+      "requirements": ["text"],
+      "after": "copy-result",
+      "modifier": { "key": "command" }
+    },
+    {
+      "identifier": "lumen-paste",
+      "title": "Lumen Paste",
+      "type": "javascript",
+      "script": "script.js",
+      "requirements": ["text"],
+      "after": "paste-result",
+      "modifier": { "key": "shift" }
+    }
+  ],
+  "options": [
+    {
+      "identifier": "targetLang",
+      "label": "Target Language",
+      "type": "string",
+      "default": "zh",
+      "description": "ISO 639-1 code, e.g. zh, en, ja, ko, fr."
+    },
+    {
+      "identifier": "sourceLang",
+      "label": "Source Language",
+      "type": "string",
+      "default": "auto",
+      "description": "Use 'auto' for detection, or an ISO 639-1 code."
+    },
+    {
+      "identifier": "engine",
+      "label": "Engine",
+      "type": "multiple",
+      "default": "google",
+      "values": ["google", "microsoft", "deepseek", "glm", "kimi", "qwen", "doubao", "minimax", "openai"],
+      "valueLabels": ["Google", "Microsoft", "DeepSeek 深度求索", "GLM 智谱", "Kimi 月之暗面", "通义千问 阿里", "豆包 字节", "MiniMax 海螺", "OpenAI / Compatible"]
+    },
+    {
+      "identifier": "apiKey",
+      "label": "OpenAI API Key",
+      "type": "string",
+      "default": "",
+      "description": "Used only when Engine is OpenAI."
+    },
+    {
+      "identifier": "endpoint",
+      "label": "OpenAI-compatible Endpoint",
+      "type": "string",
+      "default": "https://api.openai.com/v1/chat/completions"
+    },
+    {
+      "identifier": "model",
+      "label": "OpenAI Model",
+      "type": "string",
+      "default": "gpt-4o-mini"
+    },
+    {
+      "identifier": "showSource",
+      "label": "Show source text above translation",
+      "type": "boolean",
+      "default": false
+    }
+  ]
+}

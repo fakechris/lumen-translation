@@ -1,0 +1,13 @@
+{
+  "name": "@lumen/site-rules",
+  "version": "0.1.0",
+  "description": "Community-maintained site adaptation rules for Lumen Translation.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./index.json",
+  "files": ["index.json", "rules/*.json"],
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "vitest run --passWithNoTests"
+  }
+}

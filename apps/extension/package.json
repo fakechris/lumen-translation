@@ -1,0 +1,49 @@
+{
+  "name": "@lumen/extension",
+  "version": "0.1.0",
+  "description": "Lumen Translation cross-browser extension (Chrome / Edge / Firefox / Safari).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "dev:safari": "wxt -b safari",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "build:safari": "wxt build -b safari",
+    "safari:init": "wxt safari init",
+    "safari:build": "wxt safari build",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "typecheck": "wxt prepare && tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "compile": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@lumen/core": "workspace:*",
+    "@lumen/engines": "workspace:*",
+    "@lumen/dom": "workspace:*",
+    "@lumen/ocr": "workspace:*",
+    "@lumen/pdf": "workspace:*",
+    "@lumen/subtitles": "workspace:*",
+    "@lumen/meetings": "workspace:*",
+    "@lumen/sync": "workspace:*",
+    "jszip": "^3.10.1",
+    "pdfjs-dist": "^4.8.69",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tesseract.js": "^5.1.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.1",
+    "@wxt-dev/module-react": "^1.1.1",
+    "tailwindcss": "^4.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8",
+    "wxt": "^0.20.18"
+  }
+}
