@@ -1,0 +1,35 @@
+{
+  "name": "@lumen/pdf",
+  "version": "0.1.0",
+  "description": "Lumen Translation PDF helper: extract text and render bilingual reflow views via pdf.js.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@lumen/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "pdfjs-dist": "^4.8.69"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "pdfjs-dist": "^4.8.69",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

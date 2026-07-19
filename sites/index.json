@@ -1,0 +1,17 @@
+[
+  {
+    "match": "https://news.ycombinator.com/*",
+    "paragraphSelectors": [".title", ".comment-tree .commtext"],
+    "bilingual": true
+  },
+  {
+    "match": "https://github.com/*",
+    "excludeSelectors": ["pre", "code", ".blob-code", ".markdown-body pre"],
+    "bilingual": true
+  },
+  {
+    "match": "https://*.medium.com/*",
+    "paragraphSelectors": ["article section"],
+    "bilingual": true
+  }
+]

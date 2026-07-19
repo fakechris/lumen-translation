@@ -1,0 +1,24 @@
+{
+  "name": "@lumen/worker",
+  "version": "0.1.0",
+  "description": "Self-hostable Lumen sync worker (Cloudflare Workers / any JS runtime). Stores settings snapshots behind a bearer token.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/server.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "echo 'no build step; wrangler bundles at deploy time'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.99.0"
+  }
+}

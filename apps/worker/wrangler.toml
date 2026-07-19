@@ -1,0 +1,11 @@
+name = "lumen-sync"
+main = "src/server.ts"
+compatibility_date = "2024-12-01"
+
+# Set your bearer token via: wrangler secret put LUMEN_TOKEN
+# Set your KV namespace via: wrangler kv:namespace create LUMEN_KV
+# then bind it below.
+
+[[kv_namespaces]]
+binding = "LUMEN_KV"
+id = "replace-with-your-kv-namespace-id"

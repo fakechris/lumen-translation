@@ -1,0 +1,22 @@
+{
+  "extName": {
+    "message": "Lumen Translation",
+    "description": "Extension name shown in the browser UI."
+  },
+  "extDescription": {
+    "message": "Open-source bilingual web translation. Apache-2.0. Alternative to Immersive Translate / Kiss Translator / FluentRead.",
+    "description": "Extension description shown in the extensions page."
+  },
+  "commandToggleTranslate": {
+    "message": "Toggle page translation",
+    "description": "Keyboard shortcut description."
+  },
+  "commandTranslateSelection": {
+    "message": "Translate the current text selection",
+    "description": "Keyboard shortcut description."
+  },
+  "commandOpenPopup": {
+    "message": "Open the Lumen control popup",
+    "description": "Keyboard shortcut description."
+  }
+}

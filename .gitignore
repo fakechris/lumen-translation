@@ -1,0 +1,16 @@
+node_modules
+dist
+build
+.output
+.wxt
+*.log
+.DS_Store
+.env
+.env.local
+*.local
+coverage
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+# Generated userscript (built by apps/userscript; shipped via Releases)
+/lumen.user.js

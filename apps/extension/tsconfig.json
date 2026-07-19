@@ -1,0 +1,16 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["chrome", "vite/client"],
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": [
+    "entrypoints/**/*",
+    "src/**/*",
+    "wxt.config.ts",
+    ".wxt/types/**/*.d.ts",
+    ".wxt/wxt.d.ts"
+  ]
+}

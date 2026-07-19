@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+/* Shared form control used by popup/options. */
+@layer components {
+  .input {
+    @apply w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200;
+  }
+}
+
+/* ============================================================
+ * Content-script styles for bilingual rendering.
+ * Injected into pages via the content script; scoped under the
+ * `lumen-translation` custom element and our floating ball.
+ * ============================================================ */
+
+lumen-translation {
+  display: block;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-left: 3px solid #2563eb;
+  background: rgba(37, 99, 235, 0.05);
+  border-radius: 4px;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  font-family: inherit;
+  transition: background 0.2s ease;
+}
+
+lumen-translation:hover {
+  background: rgba(37, 99, 235, 0.1);
+}
+
+/* Style variants — picked via data-lumen-style */
+lumen-translation[data-lumen-style="green"] {
+  border-left-color: #16a34a;
+  background: rgba(22, 163, 74, 0.06);
+}
+lumen-translation[data-lumen-style="green"]:hover {
+  background: rgba(22, 163, 74, 0.12);
+}
+
+lumen-translation[data-lumen-style="plain"] {
+  border-left: none;
+  background: transparent;
+  padding: 2px 0;
+  border-top: 1px dashed #d1d5db;
+  margin-top: 4px;
+}
+
+lumen-translation[data-lumen-style="minimal"] {
+  border-left: none;
+  background: transparent;
+  padding: 0;
+  margin-top: 2px;
+  opacity: 0.92;
+}
+
+lumen-translation[data-lumen-hidden-original] {
+  display: block;
+}
+
+/* Floating control ball */
+.lumen-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  font-family: system-ui, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  z-index: 2147483646;
+  user-select: none;
+  transition: transform 0.15s ease;
+  border: none;
+}
+
+.lumen-fab:hover {
+  transform: scale(1.08);
+}
+
+.lumen-fab[data-active="true"] {
+  background: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+/* Selection translation popup */
+.lumen-sel-popup {
+  position: fixed;
+  z-index: 2147483647;
+  max-width: 360px;
+  min-width: 180px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #111;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font: 14px/1.5 system-ui, -apple-system, sans-serif;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lumen-sel-popup__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.lumen-sel-popup__close {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.lumen-sel-popup__close:hover {
+  color: #111;
+}
+
+.lumen-sel-popup__body {
+  color: #111;
+}
+
+.lumen-sel-popup__copy {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #2563eb;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}

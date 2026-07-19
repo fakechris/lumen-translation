@@ -1,0 +1,22 @@
+{
+  "extName": {
+    "message": "Lumen 翻译",
+    "description": "浏览器扩展栏中显示的扩展名称。"
+  },
+  "extDescription": {
+    "message": "开源双语网页翻译，Apache-2.0。对标沉浸式翻译 / Kiss Translator / FluentRead 的宽松协议替代品。",
+    "description": "扩展页中显示的描述。"
+  },
+  "commandToggleTranslate": {
+    "message": "切换页面翻译",
+    "description": "快捷键描述。"
+  },
+  "commandTranslateSelection": {
+    "message": "翻译当前划选文本",
+    "description": "快捷键描述。"
+  },
+  "commandOpenPopup": {
+    "message": "打开 Lumen 控制弹窗",
+    "description": "快捷键描述。"
+  }
+}
