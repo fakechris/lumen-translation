@@ -59,8 +59,9 @@ jobs:
       - name: Stage artifacts
         run: |
           mkdir -p artifacts
-          cp apps/extension/.output/chrome-mv3.zip artifacts/lumen-chrome.zip
-          cp apps/extension/.output/firefox-mv2.zip artifacts/lumen-firefox.zip
+          # WXT zips are named <package>-<version>-<browser>.zip; glob to match.
+          cp apps/extension/.output/*-chrome.zip artifacts/lumen-chrome.zip
+          cp apps/extension/.output/*-firefox.zip artifacts/lumen-firefox.zip
           cp lumen.user.js artifacts/lumen.user.js
           cp -r apps/popclip/dist/Lumen.popclipext artifacts/Lumen.popclipext
           cp apps/popclip/dist/Lumen.popclipextz artifacts/Lumen.popclipextz 2>/dev/null || true
