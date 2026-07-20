@@ -204,8 +204,16 @@ export default defineContentScript({
     }
 
     // ---------- observer ----------
+    // Debounce mutation bursts (e.g. rapid caption DOM updates) so multiple
+    // mutations in a short window coalesce into a single scan call.
+    let observerTimer: number | null = null;
     const observer = new MutationObserver(() => {
-      if (enabled) scheduleScan();
+      if (!enabled) return;
+      if (observerTimer) window.clearTimeout(observerTimer);
+      observerTimer = window.setTimeout(() => {
+        observerTimer = null;
+        scheduleScan();
+      }, 200);
     });
     observer.observe(document.body, { subtree: true, childList: true, characterData: true });
 

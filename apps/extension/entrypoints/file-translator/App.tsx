@@ -126,7 +126,11 @@ export default function App() {
             <div key={b.id} className="border-b last:border-b-0 pb-3">
               <div
                 className="prose prose-sm max-w-none"
-                // Render the original block (HTML for html/epub, plain for txt/md)
+                // Safe: every block's `html` is sanitized at parse time.
+                // TXT/Markdown blocks are built from escapeHtml (fully escaped).
+                // HTML/ePub blocks are run through `sanitizeHtml` (DOMParser-based)
+                // which strips <script>/<style>/<iframe>/..., on* event handlers,
+                // and javascript:/vbscript:/data: URIs in href/src. See parsers.
                 dangerouslySetInnerHTML={{ __html: b.html }}
               />
               {b.translated !== undefined && (
@@ -236,7 +240,7 @@ function parseHtml(text: string): Block[] {
     seen.add(el);
     const t = (el.textContent ?? "").trim();
     if (!t) continue;
-    blocks.push({ id: `b${i++}`, html: el.outerHTML, text: t });
+    blocks.push({ id: `b${i++}`, html: sanitizeHtml(el.outerHTML), text: t });
   }
   if (blocks.length === 0) {
     // Fallback: whole body text.
@@ -283,7 +287,7 @@ async function parseEpub(file: File): Promise<Block[]> {
     doc.querySelectorAll(selector).forEach((el) => {
       const text = (el.textContent ?? "").trim();
       if (!text) return;
-      blocks.push({ id: `b${i++}`, html: el.outerHTML, text });
+      blocks.push({ id: `b${i++}`, html: sanitizeHtml(el.outerHTML), text });
     });
   }
   return blocks;
@@ -320,4 +324,56 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
     c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
   );
+}
+
+/**
+ * Sanitize untrusted HTML (from uploaded .html/.htm/.epub files) before it
+ * reaches `dangerouslySetInnerHTML`. Uses DOMParser so no new dependency is
+ * introduced — the extension already runs in a DOM environment.
+ *
+ * Strips:
+ *   - <script>, <style>, <iframe>, <object>, <embed>, <link>, <meta>,
+ *     <base>, <form> elements (removed entirely, including descendants).
+ *   - Any attribute whose name starts with `on` (event handlers like
+ *     onclick, onerror, onmouseover, ...).
+ *   - javascript:/vbscript:/data: URIs in href, src, xlink:href, formaction,
+ *     and similar URL-bearing attributes.
+ *
+ * The returned string is the sanitized innerHTML of a fresh <body>; it is
+ * safe to assign via `dangerouslySetInnerHTML`.
+ */
+function sanitizeHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const body = doc.body;
+
+  // Remove disallowed elements entirely (descendants go with them).
+  body
+    .querySelectorAll("script, style, iframe, object, embed, link, meta, base, form")
+    .forEach((el) => el.remove());
+
+  // Strip dangerous attributes from every remaining element.
+  const urlAttrs = new Set(["href", "src", "xlink:href", "formaction", "action", "poster", "background", "cite"]);
+  body.querySelectorAll("*").forEach((el) => {
+    // Clone attributes list so removal during iteration is safe.
+    Array.from(el.attributes).forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+        return;
+      }
+      if (urlAttrs.has(name)) {
+        const value = attr.value.trim().toLowerCase().replace(/^[\s\n\r\t]+/, "");
+        // Strip whitespace/control chars then block dangerous URI schemes.
+        if (
+          value.startsWith("javascript:") ||
+          value.startsWith("vbscript:") ||
+          value.startsWith("data:")
+        ) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+  });
+
+  return body.innerHTML;
 }

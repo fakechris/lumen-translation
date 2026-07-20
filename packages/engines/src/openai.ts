@@ -7,6 +7,7 @@ import type {
   TranslatedSegment,
 } from "@lumen/core";
 import { TranslationError } from "@lumen/core";
+import { fetchWithRetry, type EngineFetchOptions } from "./fetch-utils.js";
 
 /**
  * OpenAI Chat Completions engine. Works with any OpenAI-compatible endpoint
@@ -23,6 +24,10 @@ export interface OpenAIEngineOptions {
   temperature?: number;
   /** Extra headers (e.g. for OpenRouter). */
   headers?: Record<string, string>;
+  /** Request timeout in ms (default 30000). */
+  timeoutMs?: number;
+  /** Max retries on 429/503 (default 3). */
+  maxRetries?: number;
 }
 
 interface ChatChoice {
@@ -48,6 +53,11 @@ export function createOpenAIEngine(
 ): Engine {
   const endpoint = opts.endpoint ?? "https://api.openai.com/v1/chat/completions";
   const model = opts.model ?? "gpt-4o-mini";
+  const fetchOpts: EngineFetchOptions = {
+    engineId: "openai",
+    timeoutMs: opts.timeoutMs,
+    maxRetries: opts.maxRetries,
+  };
   return {
     id: "openai",
     label: "OpenAI / Compatible",
@@ -60,23 +70,27 @@ export function createOpenAIEngine(
         .replace("{SOURCE}", pair.source === "auto" ? "the source language" : pair.source)
         .replace("{TARGET}", pair.target);
       const user = buildUserMessage(segments, glossary);
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
-          ...opts.headers,
+      const res = await fetchWithRetry(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
+            ...opts.headers,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: opts.temperature ?? 0,
+            stream: false,
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: user },
+            ],
+          }),
         },
-        body: JSON.stringify({
-          model,
-          temperature: opts.temperature ?? 0,
-          stream: false,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-        }),
-      });
+        fetchOpts,
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as ChatResponse;
         throw new TranslationError(
@@ -96,24 +110,28 @@ export function createOpenAIEngine(
         .replace("{SOURCE}", pair.source === "auto" ? "the source language" : pair.source)
         .replace("{TARGET}", pair.target);
       const user = buildUserMessage(segments, glossary);
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
-          ...opts.headers,
+      const res = await fetchWithRetry(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
+            ...opts.headers,
+          },
+          body: JSON.stringify({
+            model,
+            temperature: opts.temperature ?? 0,
+            stream: true,
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: user },
+            ],
+          }),
         },
-        body: JSON.stringify({
-          model,
-          temperature: opts.temperature ?? 0,
-          stream: true,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-        }),
-      });
+        fetchOpts,
+      );
       if (!res.ok || !res.body) {
         const body = (await res.json().catch(() => ({}))) as ChatResponse;
         throw new TranslationError(

@@ -1,5 +1,6 @@
 import type { Engine, EngineRequest, TranslatedSegment } from "@lumen/core";
 import { TranslationError } from "@lumen/core";
+import { fetchWithRetry } from "./fetch-utils.js";
 
 /** DeepL (free or pro API). Requires an API key. */
 export interface DeepLEngineOptions {
@@ -7,6 +8,10 @@ export interface DeepLEngineOptions {
   /** Use the free endpoint (default) or pro. */
   pro?: boolean;
   endpoint?: string;
+  /** Request timeout in ms (default 30000). */
+  timeoutMs?: number;
+  /** Max retries on 429/503 (default 3). */
+  maxRetries?: number;
 }
 
 interface DeepLResponse {
@@ -29,6 +34,11 @@ export function createDeepLEngine(opts: DeepLEngineOptions): Engine {
     (opts.pro
       ? "https://api.deepl.com/v2/translate"
       : "https://api-free.deepl.com/v2/translate");
+  const fetchOpts = {
+    engineId: "deepl",
+    timeoutMs: opts.timeoutMs,
+    maxRetries: opts.maxRetries,
+  };
   return {
     id: "deepl",
     label: "DeepL",
@@ -42,14 +52,18 @@ export function createDeepLEngine(opts: DeepLEngineOptions): Engine {
         params.set("source_lang", pair.source.toUpperCase());
       }
       for (const seg of segments) params.append("text", seg.text);
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `DeepL-Auth-Key ${opts.apiKey}`,
-          "Content-Type": "application/x-www-form-urlencoded",
+      const res = await fetchWithRetry(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `DeepL-Auth-Key ${opts.apiKey}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params.toString(),
         },
-        body: params.toString(),
-      });
+        fetchOpts,
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as DeepLResponse;
         throw new TranslationError(

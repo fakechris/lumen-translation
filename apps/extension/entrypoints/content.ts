@@ -403,12 +403,21 @@ export default defineContentScript({
         removeFab();
       });
 
-    // Surface an external event API so other tools can drive Lumen programmatically.
-    window.addEventListener("lumen", ((e: CustomEvent) => {
-      const action = e.detail?.action;
-      if (action === "toggle_translate") togglePage();
-      else if (action === "translate_selection") void translateSelection();
-      else if (action === "translate_input") void translateInput();
-    }) as EventListener);
+    // Surface an external event API so other tools can drive Lumen
+    // programmatically. Gated behind an opt-in setting because allowing any
+    // page to trigger translation without user consent is a security risk.
+    // `allowExternalControl` is not yet declared on the Settings type in
+    // @lumen/core (we cannot edit core from here), so read it defensively and
+    // default to false. The setting should be surfaced in the options UI later.
+    const allowExternalControl =
+      (settings as { allowExternalControl?: boolean }).allowExternalControl === true;
+    if (allowExternalControl) {
+      window.addEventListener("lumen", ((e: CustomEvent) => {
+        const action = e.detail?.action;
+        if (action === "toggle_translate") togglePage();
+        else if (action === "translate_selection") void translateSelection();
+        else if (action === "translate_input") void translateInput();
+      }) as EventListener);
+    }
   },
 });

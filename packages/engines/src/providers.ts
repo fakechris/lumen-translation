@@ -76,14 +76,18 @@ export const PROVIDER_CATALOG: ProviderPreset[] = [
     id: "doubao",
     label: "豆包 字节火山方舟 Ark",
     endpoint: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-    model: "doubao-1-5-pro-32k-250115",
+    // Use the stable, non-dated Doubao model id. Dated snapshots (e.g.
+    // `doubao-1-5-pro-32k-250115`) expire and stop serving; `doubao-pro-32k`
+    // is the non-snapshot alias Volcengine keeps pointed at the current
+    // production tier.
+    model: "doubao-pro-32k",
     models: [
-      "doubao-1-5-pro-32k-250115",
-      "doubao-1-5-lite-32k-250115",
       "doubao-pro-32k",
       "doubao-pro-128k",
       "doubao-lite-32k",
       "doubao-lite-128k",
+      "doubao-1-5-pro-32k-250115",
+      "doubao-1-5-lite-32k-250115",
     ],
     needsKey: true,
     docs: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
@@ -181,7 +185,15 @@ export const PROVIDER_CATALOG: ProviderPreset[] = [
       "deepseek/deepseek-chat",
     ],
     needsKey: true,
-    headers: { "HTTP-Referer": "https://lumen-translation.app", "X-Title": "Lumen Translation" },
+    // OpenRouter rewards apps that send an HTTP-Referer + X-Title with higher
+    // rate limits. These are neutral defaults — the repo URL and product name.
+    // Callers can override either header (or add their own) via
+    // `ProviderEngineOptions` / `OpenAIEngineOptions.headers`, which merge on
+    // top of these.
+    headers: {
+      "HTTP-Referer": "https://github.com/fakechris/lumen-translation",
+      "X-Title": "Lumen Translation",
+    },
     docs: "https://openrouter.ai/keys",
   },
 ];
@@ -200,6 +212,25 @@ export interface ProviderEngineOptions {
   endpoint?: string;
   temperature?: number;
   systemPrompt?: string;
+  /**
+   * Override the OpenRouter `HTTP-Referer` attribution header. Ignored for
+   * providers that don't use it. Defaults to the repo URL.
+   */
+  httpReferer?: string;
+  /**
+   * Override the OpenRouter `X-Title` attribution header. Ignored for
+   * providers that don't use it. Defaults to "Lumen Translation".
+   */
+  xTitle?: string;
+  /**
+   * Extra headers to merge on top of the preset's headers (caller wins on
+   * conflict).
+   */
+  headers?: Record<string, string>;
+  /** Request timeout in ms (default 30000). */
+  timeoutMs?: number;
+  /** Max retries on 429/503 (default 3). */
+  maxRetries?: number;
 }
 
 /**
@@ -221,6 +252,20 @@ export function createProviderEngine(
 
   const headers: Record<string, string> = { ...(preset.headers ?? {}) };
 
+  // OpenRouter attribution headers are configurable overrides on top of the
+  // preset's neutral defaults. Only apply when the preset already declares
+  // them (so we don't add OpenRouter-specific headers to other providers).
+  if (preset.headers?.["HTTP-Referer"] && opts.httpReferer !== undefined) {
+    headers["HTTP-Referer"] = opts.httpReferer;
+  }
+  if (preset.headers?.["X-Title"] && opts.xTitle !== undefined) {
+    headers["X-Title"] = opts.xTitle;
+  }
+  // Caller-supplied extra headers always win.
+  if (opts.headers) {
+    for (const [k, v] of Object.entries(opts.headers)) headers[k] = v;
+  }
+
   // If the preset declares a custom auth header template, build it from the
   // user's API key and pass it through `headers`. In that case we deliberately
   // do NOT forward the apiKey to createOpenAIEngine, so it won't also emit a
@@ -240,6 +285,8 @@ export function createProviderEngine(
     temperature: opts.temperature,
     systemPrompt: opts.systemPrompt,
     headers,
+    timeoutMs: opts.timeoutMs,
+    maxRetries: opts.maxRetries,
   };
   const engine = createOpenAIEngine(openaiOpts);
   return { ...engine, id: preset.id, label: preset.label };

@@ -127,6 +127,15 @@ export const DEFAULT_SETTINGS: Settings = {
   glossary: [],
   rules: [],
   subscribedRuleUrls: [],
+  // NOTE: these are cross-platform default accelerator strings ("Modifier+Key"
+  // form), not browser-specific bindings. They are intentionally kept in core
+  // because both the extension and the userscript read them as the baseline
+  // default and override per-platform at the binding layer. The host (browser
+  // extension / userscript / mobile shell) is responsible for translating the
+  // string into a platform key event; core never interprets these. Moving
+  // them out of core would force every consumer (including packages/sync's
+  // merge tests) to duplicate the baseline, so the lower-risk choice is to
+  // keep them here as a shared cross-platform default.
   shortcuts: {
     toggleTranslate: "Alt+Q",
     toggleStyle: "Alt+C",

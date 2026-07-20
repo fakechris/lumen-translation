@@ -10,6 +10,12 @@ import type {
  * Translate a flat list of segments through an engine, with batching and
  * concurrency control. Batching is engine-driven via `supportsBatch`: engines
  * that don't support batching are called one segment at a time.
+ *
+ * Single-segment requests go through the same batch path as multi-segment
+ * requests (a one-element batch) so there is exactly one code path for
+ * engine.translate invocation, consistent error handling, and consistent
+ * usage aggregation. The only special case is non-batching engines, which
+ * still get one segment per call.
  */
 export async function translateAll(
   engine: Engine,
@@ -19,7 +25,7 @@ export async function translateAll(
   const concurrency = Math.max(1, opts.concurrency ?? 6);
   const maxBatchSize = Math.max(1, opts.maxBatchSize ?? 32);
 
-  if (engine.supportsBatch !== false && req.segments.length > 1) {
+  if (engine.supportsBatch !== false) {
     const batches = chunk(req.segments, maxBatchSize);
     const results = await mapAsync(batches, async (batch) => {
       return engine.translate({ ...req, segments: batch });
@@ -27,7 +33,7 @@ export async function translateAll(
     return mergeResults(results);
   }
 
-  // One-by-one path.
+  // Non-batching engines: one segment per call.
   const results = await mapAsync(req.segments, async (seg) => {
     return engine.translate({ ...req, segments: [seg] });
   }, concurrency);
@@ -79,23 +85,59 @@ function mergeResults(results: EngineResult[]): EngineResult {
   };
 }
 
+/**
+ * Common HTML entities decoded before comparison. Decoded with a plain string
+ * replace (not DOMParser) so this stays DOM-agnostic and works in workers /
+ * non-browser hosts.
+ */
+const HTML_ENTITIES: ReadonlyArray<[string, string]> = [
+  ["&amp;", "&"],
+  ["&lt;", "<"],
+  ["&gt;", ">"],
+  ["&quot;", '"'],
+  ["&#39;", "'"],
+  ["&nbsp;", " "],
+];
+
+/**
+ * Normalize text for dedupe comparison. We do NOT mutate the original
+ * segment text (callers render that); the normalized form is only used as the
+ * dedup key.
+ *
+ * Normalization steps:
+ * 1. Decode the common HTML entities listed above.
+ * 2. Unicode NFC normalization (so canonical and composed forms match).
+ * 3. Collapse internal runs of whitespace to a single space.
+ * 4. Trim leading / trailing whitespace.
+ */
+export function normalizeForDedup(text: string): string {
+  let out = text;
+  for (const [entity, ch] of HTML_ENTITIES) {
+    if (out.includes(entity)) out = out.split(entity).join(ch);
+  }
+  out = out.normalize("NFC");
+  out = out.replace(/\s+/g, " ").trim();
+  return out;
+}
+
 /** Deduplicate segments by text content to avoid duplicate API calls. */
 export function dedupeSegments(segments: Segment[]): {
   unique: Segment[];
   restore: (translated: TranslatedSegment[]) => TranslatedSegment[];
 } {
-  const byText = new Map<string, Segment>();
+  const byKey = new Map<string, Segment>();
   const byId = new Map<string, string>(); // id -> canonicalId
   for (const seg of segments) {
-    const canonical = byText.get(seg.text);
+    const key = normalizeForDedup(seg.text);
+    const canonical = byKey.get(key);
     if (canonical) {
       byId.set(seg.id, canonical.id);
     } else {
-      byText.set(seg.text, seg);
+      byKey.set(key, seg);
       byId.set(seg.id, seg.id);
     }
   }
-  const unique = Array.from(byText.values());
+  const unique = Array.from(byKey.values());
   const restore = (translated: TranslatedSegment[]): TranslatedSegment[] => {
     const textById = new Map(translated.map((t) => [t.id, t.text]));
     return segments.map((seg) => ({

@@ -175,6 +175,12 @@ export function detectParagraphs(opts: DetectionOptions = {}): DetectedParagraph
   const excludeMatcher = rule?.excludeSelectors?.length
     ? compileSelectorMatcher(rule.excludeSelectors)
     : null;
+  // When the rule provides explicit paragraphSelectors, those selectors
+  // override the default tag heuristic: an element is treated as a paragraph
+  // root when it matches one of the selectors (instead of "leaf-ish block").
+  const paragraphMatcher = rule?.paragraphSelectors?.length
+    ? compileSelectorMatcher(rule.paragraphSelectors)
+    : null;
   const rootSelector = rule?.rootSelector;
   const roots: Element[] = rootSelector
     ? Array.from((root as Document | Element).querySelectorAll?.(rootSelector) ?? [])
@@ -197,20 +203,22 @@ export function detectParagraphs(opts: DetectionOptions = {}): DetectedParagraph
       // Cheap attribute-based visibility check: prunes whole hidden subtrees
       // without the cost of getComputedStyle.
       if (isAttrHidden(el)) return "skip";
-      // If this element has a block child that is itself a paragraph root,
-      // recurse rather than taking the whole subtree.
-      const directBlock = hasBlockChild(el);
       const ownText = ownOrLeafText(el);
-      if (!directBlock && ownText && ownText.trim().length >= minLen) {
-        // Only run the expensive computed-style / layout checks on genuine
-        // paragraph candidates, not on every node in the tree.
-        if (isComputedHidden(el, hasLayout)) return "skip";
-        seen.add(el);
-        const id = el.getAttribute("data-lumen-id") ?? nextId();
-        el.setAttribute("data-lumen-id", id);
-        const inline = serializeInline(el);
-        out.push({ id, node: el, text: inlineToText(inline), inline });
-        return "skip"; // don't double-collect descendants
+      if (ownText && ownText.trim().length >= minLen) {
+        // When paragraphSelectors is set, match against it; otherwise use the
+        // default "no block child" heuristic to find leaf-ish paragraph roots.
+        const isParagraph = paragraphMatcher ? paragraphMatcher(el) : !hasBlockChild(el);
+        if (isParagraph) {
+          // Only run the expensive computed-style / layout checks on genuine
+          // paragraph candidates, not on every node in the tree.
+          if (isComputedHidden(el, hasLayout)) return "skip";
+          seen.add(el);
+          const id = el.getAttribute("data-lumen-id") ?? nextId();
+          el.setAttribute("data-lumen-id", id);
+          const inline = serializeInline(el);
+          out.push({ id, node: el, text: inlineToText(inline), inline });
+          return "skip"; // don't double-collect descendants
+        }
       }
       return "recurse";
     });
@@ -240,7 +248,19 @@ function walk(
   while (stack.length) {
     const el = stack.pop()!;
     const action = visit(el);
-    if (action === "skip") continue;
+    if (action === "skip") {
+      // IFRAME is in SKIP_TAGS so visit returns "skip", but for same-origin
+      // iframes we still want to translate the nested document. Descend into
+      // the iframe's content document body when it is accessible; cross-origin
+      // iframes throw or return null and are safely ignored.
+      if (el.tagName === "IFRAME") {
+        const iframeKids = sameOriginIframeChildren(el);
+        if (iframeKids) {
+          for (let i = iframeKids.length - 1; i >= 0; i--) stack.push(iframeKids[i]);
+        }
+      }
+      continue;
+    }
     const children = el.children;
     // Push light children first, then shadow children, so that after LIFO
     // popping the open shadow content is visited before the light children.
@@ -255,6 +275,27 @@ function walk(
       }
     }
   }
+}
+
+/**
+ * Returns the child elements of a same-origin iframe's document body, or null
+ * if the iframe is cross-origin / not yet loaded / has no body. Accessing
+ * `contentDocument` on a cross-origin iframe throws a SecurityError or returns
+ * null; both are caught here so callers can treat iframes uniformly.
+ */
+function sameOriginIframeChildren(el: Element): Element[] | null {
+  if (el.tagName !== "IFRAME") return null;
+  const iframe = el as HTMLIFrameElement;
+  let doc: Document | null = null;
+  try {
+    doc = iframe.contentDocument;
+  } catch {
+    return null;
+  }
+  if (!doc) return null;
+  const body = doc.body ?? doc.documentElement;
+  if (!body) return null;
+  return Array.from(body.children);
 }
 
 /** The element's shadow root if it is open (never closed roots). */
