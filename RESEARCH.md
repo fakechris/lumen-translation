@@ -34,7 +34,7 @@ Build a complete open-source bilingual translation product matrix under a permis
 | Language | **TypeScript** (strict) | Type safety across a multi-package monorepo; strong ecosystem. |
 | UI framework | **React 19 + Tailwind CSS v4** | Largest contributor pool; low community-contribution friction. |
 | State | **Zustand** | Lightweight, no boilerplate; fits the settings/options store. |
-| Storage | `browser.storage` + IndexedDB (Dexie where needed) | Config via storage API; larger data via IndexedDB. |
+| Storage | `browser.storage.local` (with a `localStorage` fallback in non-extension environments) | Config via the browser extension storage API; a localStorage fallback supports non-extension environments. |
 | Content-script DOM | Native + `MutationObserver` queue | Paragraph smart detection is the core; keep it dependency-free. |
 | PDF | **pdf.js** + self-built bilingual layout layer | Reflow bilingual output preserving reading order. |
 | Subtitles | Self-built cue merge/split + AI re-segmentation | YouTube via `ytInitialPlayerResponse`/`timedtext`; pluggable per-platform adapters. |

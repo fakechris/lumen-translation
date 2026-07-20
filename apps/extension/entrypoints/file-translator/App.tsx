@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { translateAll, dedupeSegments, type Segment, type Settings } from "@lumen/core";
+import { translateAll, dedupeSegments, escapeHtml, type Segment, type Settings } from "@lumen/core";
 import { useSettings } from "../../src/store";
 import { buildEngine } from "../../src/engines";
 import { t } from "../../src/i18n";
@@ -318,12 +318,6 @@ function serialize(blocks: Block[], kind: "txt" | "md" | "html", bilingual: bool
 .lumen-block{margin:0 0 1em;padding:0 0 1em;border-bottom:1px solid #eee}
 .lumen-translation{margin-top:.5em;padding:.25em .5em;border-left:3px solid #2563eb;background:rgba(37,99,235,.05);color:#111}
 </style></head><body>${body}</body></html>`;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
-  );
 }
 
 /**

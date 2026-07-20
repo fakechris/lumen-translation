@@ -9,6 +9,7 @@
  */
 
 import type { SubtitleCue } from "./types.js";
+import { proportionalTimings } from "./timing.js";
 
 export interface SplitOptions {
   /** Maximum characters per cue. Default 60. */
@@ -68,25 +69,6 @@ function splitTextAtSentences(text: string, maxChars: number): string[] {
     }
   }
   return coalesced.length ? coalesced : [text];
-}
-
-/** Distribute `total` seconds across `parts` proportionally to their weights. */
-function proportionalTimings(
-  start: number,
-  end: number,
-  weights: number[],
-): Array<{ start: number; end: number }> {
-  const total = Math.max(0, end - start);
-  const totalWeight = weights.reduce((a, b) => a + b, 0) || 1;
-  const out: Array<{ start: number; end: number }> = [];
-  let cursor = start;
-  for (let i = 0; i < weights.length; i++) {
-    const dur = (weights[i] / totalWeight) * total;
-    const segEnd = i === weights.length - 1 ? end : cursor + dur;
-    out.push({ start: cursor, end: segEnd });
-    cursor = segEnd;
-  }
-  return out;
 }
 
 export function splitLongCues(cues: SubtitleCue[], opts: SplitOptions = {}): SubtitleCue[] {

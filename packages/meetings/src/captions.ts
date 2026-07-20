@@ -1,4 +1,4 @@
-import type { Engine, LanguagePair } from "@lumen/core";
+import { escapeHtml, type Engine, type LanguagePair } from "@lumen/core";
 
 /** A single live caption line captured from a meeting. */
 export interface Caption {
@@ -133,10 +133,4 @@ export function createCaptionOverlay(doc: Document = document): {
       el.textContent = "";
     },
   };
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
-  );
 }

@@ -312,7 +312,7 @@ Status as of `v0.1.0`.
 
 ## Privacy
 
-- All settings, rules, and history are stored locally (`browser.storage` / IndexedDB).
+- All settings, rules, and history are stored locally via `browser.storage.local` (with a `localStorage` fallback in non-extension environments).
 - AI calls go directly from your device to the engine provider using **your own API key**. Lumen never proxies your traffic.
 - The sync backend is **yours** (your WebDAV server or your Cloudflare Worker). No Lumen-operated cloud sees your data.
 - No telemetry, no analytics, no advertising, no acquisition path. Ever.

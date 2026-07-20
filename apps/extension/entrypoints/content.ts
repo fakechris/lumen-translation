@@ -1,4 +1,4 @@
-import { translateAll, dedupeSegments, type Engine, type Settings, type Segment } from "@lumen/core";
+import { translateAll, dedupeSegments, escapeHtml, type Engine, type Settings, type Segment } from "@lumen/core";
 import {
   detectParagraphs,
   paragraphsToSegments,
@@ -343,12 +343,6 @@ export default defineContentScript({
     function globToRegex(glob: string): RegExp {
       const re = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
       return new RegExp(re);
-    }
-
-    function escapeHtml(s: string): string {
-      return s.replace(/[&<>"']/g, (c) =>
-        c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
-      );
     }
 
     // ---------- wire up ----------

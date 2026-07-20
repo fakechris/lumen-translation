@@ -102,6 +102,18 @@ export interface Rule {
 /** Visual style of the bilingual translation block. */
 export type TranslationStyle = "blue" | "green" | "plain" | "minimal";
 
+/**
+ * Common configuration shape for a translation engine. Providers may store
+ * extra provider-specific fields via the index signature.
+ */
+export interface EngineConfig {
+  apiKey?: string;
+  endpoint?: string;
+  model?: string;
+  region?: "domestic" | "overseas";
+  [key: string]: unknown;
+}
+
 /** User settings stored by the host (extension/userscript). */
 export interface Settings {
   activeEngineId: string;
@@ -115,6 +127,11 @@ export interface Settings {
   shortcuts: Record<string, string>;
   concurrency: number;
   maxBatchSize: number;
+  /**
+   * Engine-specific configuration plus internal cross-cutting keys such as
+   * `__sync__`. Kept as `Record<string, unknown>` so the sync config path does
+   * not need to conform to `EngineConfig`.
+   */
   engines: Record<string, unknown>;
 }
 

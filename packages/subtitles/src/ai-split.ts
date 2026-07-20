@@ -14,6 +14,7 @@
 import type { Engine, LanguagePair, Segment, TranslatedSegment } from "@lumen/core";
 
 import type { SubtitleCue } from "./types.js";
+import { proportionalTimings } from "./timing.js";
 
 const SENTENCE_BOUNDARY = /[.!?。！？]\s/;
 
@@ -59,23 +60,6 @@ async function promptEngine(
 /** Normalize whitespace for fair text comparison. */
 function normalize(s: string): string {
   return s.replace(/\s+/g, " ").trim();
-}
-
-function proportionalTimings(
-  start: number,
-  end: number,
-  weights: number[],
-): Array<{ start: number; end: number }> {
-  const total = Math.max(0, end - start);
-  const totalWeight = weights.reduce((a, b) => a + b, 0) || 1;
-  const out: Array<{ start: number; end: number }> = [];
-  let cursor = start;
-  for (let i = 0; i < weights.length; i++) {
-    const segEnd = i === weights.length - 1 ? end : cursor + (weights[i] / totalWeight) * total;
-    out.push({ start: cursor, end: segEnd });
-    cursor = segEnd;
-  }
-  return out;
 }
 
 export async function aiSplitCues(
