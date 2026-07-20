@@ -1,4 +1,4 @@
-import { translateAll, dedupeSegments, type Segment } from "@lumen/core";
+import { translateCues, type SubtitleCue } from "@lumen/subtitles";
 import { readSettings } from "../src/store";
 import { buildEngine } from "../src/engines";
 import "../src/styles.css";
@@ -108,27 +108,45 @@ export default defineContentScript({
     }
 
     // ---------- translation ----------
-    async function translateText(text: string): Promise<string> {
-      const key = text;
-      if (cache.has(key)) return cache.get(key)!;
-      const seg: Segment = { id: "v", text };
-      const { unique, restore } = dedupeSegments([seg]);
-      try {
-        const r = await translateAll(
-          engine,
-          {
-            pair: { source: settings.sourceLang, target: settings.targetLang },
-            segments: unique,
-            glossary: settings.glossary,
-          },
-          { concurrency: 4, maxBatchSize: 16 },
-        );
-        const out = restore(r.segments)[0]?.text ?? text;
-        cache.set(key, out);
-        return out;
-      } catch (err) {
-        return `[${(err as Error).message}]`;
+    async function translateTexts(texts: string[]): Promise<Map<string, string>> {
+      const out = new Map<string, string>();
+      if (texts.length === 0) return out;
+      // Filter cached + build cues for the rest, routing through the
+      // @lumen/subtitles pipeline (dedupe + batch + restore) so the package
+      // genuinely drives video translation.
+      const uncached: string[] = [];
+      for (const text of texts) {
+        if (cache.has(text)) out.set(text, cache.get(text)!);
+        else uncached.push(text);
       }
+      if (uncached.length === 0) return out;
+      const cues: SubtitleCue[] = uncached.map((text, i) => ({
+        id: `v${i}`,
+        start: 0,
+        end: 0,
+        text,
+      }));
+      try {
+        const translated = await translateCues(
+          engine,
+          cues,
+          { source: settings.sourceLang, target: settings.targetLang },
+          { glossary: settings.glossary, concurrency: 4, maxBatchSize: 16 },
+        );
+        for (const cue of translated) {
+          const text = cue.originalText;
+          const tr = cue.text;
+          cache.set(text, tr);
+          out.set(text, tr);
+        }
+      } catch (err) {
+        for (const text of uncached) {
+          const tr = `[${(err as Error).message}]`;
+          cache.set(text, tr);
+          out.set(text, tr);
+        }
+      }
+      return out;
     }
 
     function findCaptionEls(): Element[] {
@@ -148,6 +166,8 @@ export default defineContentScript({
     async function scan() {
       if (!enabled) return;
       const els = findCaptionEls();
+      // Collect caption elements that don't already have a translation line.
+      const pending: { el: Element; line: HTMLDivElement; text: string }[] = [];
       for (const el of els) {
         const text = (el.textContent ?? "").trim();
         if (!text) continue;
@@ -163,8 +183,16 @@ export default defineContentScript({
         } else {
           el.insertAdjacentElement("afterend", line);
         }
-        const translated = await translateText(text);
-        if (line.isConnected) line.textContent = translated;
+        pending.push({ el, line, text });
+      }
+      if (pending.length === 0) return;
+      const texts = pending.map((p) => p.text);
+      const results = await translateTexts(texts);
+      for (const { el, line, text } of pending) {
+        if (!line.isConnected) continue;
+        line.textContent = results.get(text) ?? text;
+        // mark so we don't re-add a second line next scan
+        void el;
       }
     }
 

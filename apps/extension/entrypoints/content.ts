@@ -31,6 +31,13 @@ export default defineContentScript({
     let engine: Engine = buildEngine(settings);
     let translated = false;
     let busy = false;
+    // Dynamic-content tracking: MutationObserver + SPA route hooks re-translate
+    // newly inserted / route-changed content without re-hitting already-rendered
+    // paragraphs.
+    let pageObserver: MutationObserver | null = null;
+    let rescanTimer: number | null = null;
+    let routeTimer: number | null = null;
+    let processedNodes = new Set<Element>();
     // ---------- helpers ----------
     const refreshSettings = async (next?: Settings) => {
       settings = next ?? await readSettings();
@@ -62,6 +69,85 @@ export default defineContentScript({
       return restore(result.segments);
     };
 
+    // ---------- dynamic content: observer + SPA route hooks ----------
+    function scheduleRescan() {
+      if (rescanTimer) window.clearTimeout(rescanTimer);
+      rescanTimer = window.setTimeout(() => void rescanNewParagraphs(), 300);
+    }
+
+    async function rescanNewParagraphs() {
+      if (!translated || busy) return;
+      busy = true;
+      try {
+        const all = collectParagraphs();
+        const fresh = all.filter((p) => !processedNodes.has(p.node));
+        if (fresh.length === 0) return;
+        const segments = paragraphsToSegments(fresh);
+        const translatedSegs = await translateSegments(segments);
+        const byId = new Map(translatedSegs.map((s) => [s.id, s.text]));
+        renderBilingual(
+          fresh.map((p) => ({
+            id: p.id,
+            text: byId.get(p.id) ?? p.text,
+            original: p.node,
+            inline: p.inline,
+            hideOriginal: !settings.bilingual,
+            style: settings.style,
+          })),
+        );
+        for (const p of fresh) processedNodes.add(p.node);
+      } catch (err) {
+        showToast(`Lumen: ${(err as Error).message}`);
+      } finally {
+        busy = false;
+      }
+    }
+
+    function startPageObserver() {
+      if (pageObserver) return;
+      pageObserver = new MutationObserver(() => scheduleRescan());
+      pageObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
+
+    function stopPageObserver() {
+      pageObserver?.disconnect();
+      pageObserver = null;
+      if (rescanTimer) window.clearTimeout(rescanTimer);
+      rescanTimer = null;
+    }
+
+    // SPA route changes: wrap history methods + listen for popstate. On route
+    // change the whole page typically re-renders, so we debounce a full
+    // re-translation (clear stale wrappers + reset processed set).
+    function onRouteChange() {
+      if (!translated) return;
+      if (routeTimer) window.clearTimeout(routeTimer);
+      routeTimer = window.setTimeout(() => {
+        clearBilingual();
+        translated = false;
+        processedNodes.clear();
+        void translatePage();
+      }, 400);
+    }
+
+    function patchHistory() {
+      for (const key of ["pushState", "replaceState"] as const) {
+        const orig = history[key] as (...args: unknown[]) => void;
+        history[key] = function (...args: unknown[]) {
+          const r = orig.apply(this, args);
+          onRouteChange();
+          return r as unknown;
+        };
+      }
+      window.addEventListener("popstate", onRouteChange);
+    }
+
+    function unpatchHistory() {
+      // Best-effort restore; leaving patched is harmless because onRouteChange
+      // is a no-op when translation is off.
+      window.removeEventListener("popstate", onRouteChange);
+    }
+
     // ---------- page translation ----------
     async function translatePage() {
       if (busy) return;
@@ -82,8 +168,11 @@ export default defineContentScript({
             style: settings.style,
           })),
         );
+        for (const p of paragraphs) processedNodes.add(p.node);
         translated = true;
         setFabActive(true);
+        startPageObserver();
+        patchHistory();
       } catch (err) {
         showToast(`Lumen: ${(err as Error).message}`);
       } finally {
@@ -93,8 +182,11 @@ export default defineContentScript({
 
     function togglePage() {
       if (translated) {
+        stopPageObserver();
+        unpatchHistory();
         clearBilingual();
         translated = false;
+        processedNodes.clear();
         setFabActive(false);
       } else {
         void translatePage();
@@ -305,6 +397,8 @@ export default defineContentScript({
       ?.addEventListener?.("invalid", () => {
         document.removeEventListener("mousemove", onHover);
         document.removeEventListener("scroll", closeSelectionPopup);
+        stopPageObserver();
+        unpatchHistory();
         clearBilingual();
         removeFab();
       });

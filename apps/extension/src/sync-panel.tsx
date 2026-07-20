@@ -22,9 +22,11 @@ export function readSyncConfig(settings: Settings): SyncConfig {
 export function SyncPanel({
   settings,
   onSyncConfigChange,
+  onSettingsChange,
 }: {
   settings: Settings;
   onSyncConfigChange: (cfg: SyncConfig) => void;
+  onSettingsChange?: (s: Settings) => void;
 }) {
   const cfg = readSyncConfig(settings);
   const [status, setStatus] = useState<string | null>(null);
@@ -72,6 +74,9 @@ export function SyncPanel({
         strategy: "merge-rules",
         device: cfg.deviceId,
       });
+      // Write the merged settings back to the local store so new rules from
+      // remote actually take effect locally (and broadcast to content scripts).
+      onSettingsChange?.(result.after);
       setStatus(`Done (${result.direction}). Before=${result.before.rules.length} rules, after=${result.after.rules.length}.`);
     } catch (err) {
       setStatus(`Sync error: ${(err as Error).message}`);

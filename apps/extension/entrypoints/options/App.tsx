@@ -196,6 +196,7 @@ export default function App() {
             const engines = { ...settings.engines, __sync__: cfg };
             update({ engines });
           }}
+          onSettingsChange={(merged) => update(merged)}
         />
       </Section>
 

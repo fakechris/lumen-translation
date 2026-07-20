@@ -44,24 +44,31 @@ export function createCaptionTranslator(
   let buffer = "";
   let lastSpeaker: string | undefined;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let pending: ((text: string) => void) | null = null;
+  // All callers waiting on the current debounce window share one result.
+  // A single `pending` resolver would leak earlier callers' Promises.
+  let pending: Array<(text: string) => void> = [];
 
   const flush = async () => {
     const text = buffer.trim();
     buffer = "";
     timer = null;
-    if (!text || !pending) return;
+    const waiters = pending;
+    pending = [];
+    if (!text || waiters.length === 0) {
+      // Resolve waiters with empty input so they don't hang.
+      for (const resolve of waiters) resolve(text);
+      return;
+    }
     try {
       const result = await engine.translate({
         pair,
         segments: [{ id: "c", text }],
       });
       const out = result.segments[0]?.text ?? text;
-      pending(out);
+      for (const resolve of waiters) resolve(out);
     } catch (err) {
-      pending(`[lumen] ${(err as Error).message}`);
-    } finally {
-      pending = null;
+      const msg = `[lumen] ${(err as Error).message}`;
+      for (const resolve of waiters) resolve(msg);
     }
   };
 
@@ -75,7 +82,7 @@ export function createCaptionTranslator(
       lastSpeaker = caption.speaker;
       buffer = buffer ? `${buffer} ${caption.text}` : caption.text;
       return new Promise<string>((resolve) => {
-        pending = resolve;
+        pending.push(resolve);
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => void flush(), debounceMs);
       });
@@ -83,7 +90,7 @@ export function createCaptionTranslator(
     dispose() {
       if (timer) clearTimeout(timer);
       buffer = "";
-      pending = null;
+      pending = [];
       timer = null;
     },
   };
