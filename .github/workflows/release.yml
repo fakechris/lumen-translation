@@ -32,6 +32,12 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
       - name: Build library packages
         run: pnpm -r --filter "./packages/**" build
 

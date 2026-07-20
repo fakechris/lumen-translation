@@ -3,6 +3,7 @@ import { useSettings } from "../../src/store";
 import { ENGINE_CATALOG, ENGINE_GROUPS, getCatalogEntry } from "../../src/engines";
 import { t, type Lang, setLang } from "../../src/i18n";
 import type { Settings, Rule, GlossaryEntry, TranslationStyle } from "@lumen/core";
+import { getEngineConfig } from "@lumen/core";
 import { SubscriptionManager } from "../../src/subscriptions";
 import { SyncPanel } from "../../src/sync-panel";
 
@@ -18,7 +19,7 @@ export default function App() {
     broadcast({ ...settings, ...partial });
   };
 
-  const engineCfg = (settings.engines[settings.activeEngineId] ?? {}) as Record<string, unknown>;
+  const engineCfg = getEngineConfig(settings, settings.activeEngineId);
   const setEngineCfg = (cfg: Record<string, unknown>) => {
     const engines = { ...settings.engines, [settings.activeEngineId]: cfg };
     update({ engines });

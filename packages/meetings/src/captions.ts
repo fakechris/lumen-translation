@@ -89,9 +89,14 @@ export function createCaptionTranslator(
     },
     dispose() {
       if (timer) clearTimeout(timer);
-      buffer = "";
-      pending = [];
       timer = null;
+      // Resolve any waiters currently parked on the debounce window so their
+      // Promises don't hang forever. Resolve with "" (a disposed marker) before
+      // clearing the buffer. Idempotent: a second call finds no timer/pending.
+      const waiters = pending;
+      pending = [];
+      for (const resolve of waiters) resolve("");
+      buffer = "";
     },
   };
 }

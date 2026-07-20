@@ -1,10 +1,14 @@
 import type { Engine, EngineRequest, TranslatedSegment } from "@lumen/core";
 import { TranslationError } from "@lumen/core";
-import { fetchWithRetry } from "./fetch-utils.js";
+import { EngineFetchError, fetchWithRetry } from "./fetch-utils.js";
 
 /** Query params supported by the free google translate endpoint. */
 interface GoogleRpcResponse {
   data?: Array<Array<{ 0?: string }>>;
+}
+
+function isEmptyText(text: string): boolean {
+  return text.trim().length === 0;
 }
 
 /**
@@ -43,6 +47,9 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
     async translate(req: EngineRequest): Promise<{ segments: TranslatedSegment[] }> {
       const { pair, segments } = req;
       if (segments.length === 0) return { segments: [] };
+      if (segments.every((s) => isEmptyText(s.text))) {
+        return { segments: segments.map((s) => ({ id: s.id, text: s.text })) };
+      }
       // Google's free `translate_a/single` endpoint only accepts GET with the
       // query in the URL, so a single huge request can exceed URL length
       // limits. Split into sub-batches whose URL stays under
@@ -75,16 +82,28 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
           );
         }
         if (!res.ok) {
-          throw new TranslationError(`HTTP ${res.status}`, "google");
+          throw new EngineFetchError(`Google HTTP ${res.status}`, "google", "http", res.status);
         }
         const json = (await res.json()) as GoogleRpcResponse;
-        const text = (json.data ?? [])
-          .map((row) => row?.[0] ?? "")
-          .join("");
+        const rows = json.data ?? [];
+        const text = rows.map((row) => row?.[0] ?? "").join("");
+        if (text.trim().length === 0 && batch.some((s) => !isEmptyText(s.text))) {
+          throw new TranslationError("Google returned an empty translation response", "google");
+        }
         const parts = text.split(/\n\n@@@\n\n/);
         for (let j = 0; j < batch.length; j++) {
           const seg = batch[j];
-          out[i + j] = { id: seg.id, text: parts[j] ?? seg.text };
+          const src = seg.text;
+          if (isEmptyText(src)) {
+            out[i + j] = { id: seg.id, text: src };
+          } else if (parts[j] === undefined) {
+            throw new TranslationError(
+              `Google returned no translation for segment ${seg.id}`,
+              "google",
+            );
+          } else {
+            out[i + j] = { id: seg.id, text: parts[j] };
+          }
         }
         i += batch.length;
       }

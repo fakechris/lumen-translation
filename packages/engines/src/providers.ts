@@ -129,11 +129,11 @@ export const PROVIDER_CATALOG: ProviderPreset[] = [
     id: "spark",
     label: "讯飞星火 Spark",
     endpoint: "https://spark-api-open.xf-yun.com/v1/chat/completions",
-    // `generalv3.5` pointed at the Spark Max tier, which iFlytek retired on
-    // 2026-03-10 (merged into Ultra). `4.0Ultra` is the current flagship and
-    // is valid against the OpenAI-compatible endpoint above.
+    // `generalv3.5` (Max) and `generalv3` were retired by iFlytek on
+    // 2026-03-10. The current OpenAI-compatible endpoint serves `4.0Ultra`,
+    // `max-32k`, `pro-128k`, and `lite`.
     model: "4.0Ultra",
-    models: ["4.0Ultra", "max-32k", "generalv3.5", "generalv3", "pro-128k", "lite"],
+    models: ["4.0Ultra", "max-32k", "pro-128k", "lite"],
     needsKey: true,
     docs: "https://www.xfyun.cn/doc/spark/HTTP%E8%B0%83%E7%94%A8%E6%96%87%E6%A1%A3.html",
   },

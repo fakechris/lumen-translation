@@ -1,6 +1,6 @@
 import type { Engine, EngineRequest, TranslatedSegment } from "@lumen/core";
 import { TranslationError } from "@lumen/core";
-import { fetchWithRetry } from "./fetch-utils.js";
+import { EngineFetchError, fetchWithRetry } from "./fetch-utils.js";
 
 /**
  * Microsoft Translator via the public Edge auth token endpoint. No API key
@@ -35,6 +35,9 @@ export function createMicrosoftEngine(
     async translate(req) {
       const { pair, segments } = req as EngineRequest;
       if (segments.length === 0) return { segments: [] };
+      if (segments.every((s) => s.text.trim().length === 0)) {
+        return { segments: segments.map((s) => ({ id: s.id, text: s.text })) };
+      }
       const token = await fetchEdgeToken(opts.timeoutMs, opts.maxRetries);
       const url =
         `${endpoint}?api-version=3.0&to=${encodeURIComponent(pair.target)}` +
@@ -55,13 +58,22 @@ export function createMicrosoftEngine(
         fetchOpts,
       );
       if (!res.ok) {
-        throw new TranslationError(`HTTP ${res.status}`, "microsoft");
+        throw new EngineFetchError(`Microsoft HTTP ${res.status}`, "microsoft", "http", res.status);
       }
       const json = (await res.json()) as MicrosoftTranslation[];
-      const out: TranslatedSegment[] = segments.map((seg, i) => ({
-        id: seg.id,
-        text: json[i]?.translations?.[0]?.text ?? seg.text,
-      }));
+      const out: TranslatedSegment[] = segments.map((seg, i) => {
+        if (seg.text.trim().length === 0) {
+          return { id: seg.id, text: seg.text };
+        }
+        const translation = json[i]?.translations?.[0]?.text;
+        if (translation === undefined) {
+          throw new TranslationError(
+            `Microsoft returned no translation for segment ${seg.id}`,
+            "microsoft",
+          );
+        }
+        return { id: seg.id, text: translation };
+      });
       return { segments: out };
     },
   };

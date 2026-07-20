@@ -37,11 +37,25 @@ export function validateRemoteUrl(raw: string): string | null {
     return `Refusing to sync to a loopback host: ${host}`;
   }
 
-  if (isPrivateIpv4(host) || isPrivateIpv6(host)) {
+  if (isPrivateIpv4(host) || isPrivateIpv6(host) || isSuspiciousNumericHost(host)) {
     return `Refusing to sync to a private/loopback address: ${host}`;
   }
 
   return null;
+}
+
+/**
+ * Defense-in-depth for numeric IPv4 encoding tricks (decimal `2130706433`, hex
+ * `0x7f000001`, octal `0177.0.0.1`). For http(s) URLs the WHATWG URL parser
+ * already normalizes these to dotted-quad, so `isPrivateIpv4` sees the resolved
+ * address and blocks the private ones. This catches any bare numeric/hex host
+ * that reaches us un-normalized: a legitimate remote endpoint is always a DNS
+ * name or dotted-quad, never a single integer or `0x`-prefixed literal.
+ */
+function isSuspiciousNumericHost(host: string): boolean {
+  if (/^0x[0-9a-f]+$/i.test(host)) return true; // hex literal (0x7f000001)
+  if (/^\d+$/.test(host)) return true; // single decimal integer (2130706433)
+  return false;
 }
 
 function isPrivateIpv4(host: string): boolean {
@@ -64,9 +78,20 @@ function isPrivateIpv6(host: string): boolean {
   const h = host.toLowerCase();
   if (h === "::1" || h === "::") return true; // loopback / unspecified
 
-  // IPv4-mapped (::ffff:192.168.0.1) — evaluate the embedded v4 address.
-  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(h);
-  if (mapped) return isPrivateIpv4(mapped[1]);
+  // IPv4-mapped in dotted form (::ffff:192.168.0.1).
+  const mappedDotted = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(h);
+  if (mappedDotted) return isPrivateIpv4(mappedDotted[1]);
+
+  // IPv4-mapped in hex form. The URL parser rewrites `::ffff:127.0.0.1` to
+  // `::ffff:7f00:1`, so the dotted regex above never sees it — decode the two
+  // 16-bit groups back into four octets and evaluate the embedded v4 address.
+  const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16);
+    const lo = parseInt(mappedHex[2], 16);
+    const v4 = `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+    return isPrivateIpv4(v4);
+  }
 
   const firstGroup = h.split(":")[0];
   // fc00::/7 unique-local (fc.. / fd..)

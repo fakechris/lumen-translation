@@ -16,6 +16,13 @@ export default defineConfig({
       128: "icon/128.png",
     },
     permissions: ["storage", "activeTab", "contextMenus"],
+    // <all_urls> is required for an on-demand page translator: the content
+    // script must be able to read/translate the DOM of any page the user
+    // activates it on. The script does no heavy work (and no network calls)
+    // until the user toggles translation, so this broad permission does not
+    // imply broad data access at idle. Narrowing to activeTab-only would break
+    // the floating-ball + auto-detect UX. Engine network calls use the
+    // user's own API keys directly to provider endpoints (no proxy).
     host_permissions: ["<all_urls>"],
     commands: {
       "toggle-translate": {

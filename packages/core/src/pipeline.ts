@@ -120,6 +120,18 @@ export function normalizeForDedup(text: string): string {
   return out;
 }
 
+function isEmptyContext(context: Segment["context"]): boolean {
+  if (context == null) return true;
+  return context.prev === undefined && context.next === undefined;
+}
+
+function dedupKey(seg: Segment): string {
+  const normalized = normalizeForDedup(seg.text);
+  return isEmptyContext(seg.context)
+    ? normalized
+    : `${normalized}\u0000${JSON.stringify(seg.context)}`;
+}
+
 /** Deduplicate segments by text content to avoid duplicate API calls. */
 export function dedupeSegments(segments: Segment[]): {
   unique: Segment[];
@@ -128,7 +140,7 @@ export function dedupeSegments(segments: Segment[]): {
   const byKey = new Map<string, Segment>();
   const byId = new Map<string, string>(); // id -> canonicalId
   for (const seg of segments) {
-    const key = normalizeForDedup(seg.text);
+    const key = dedupKey(seg);
     const canonical = byKey.get(key);
     if (canonical) {
       byId.set(seg.id, canonical.id);

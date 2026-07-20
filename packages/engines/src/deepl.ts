@@ -1,6 +1,6 @@
 import type { Engine, EngineRequest, TranslatedSegment } from "@lumen/core";
 import { TranslationError } from "@lumen/core";
-import { fetchWithRetry } from "./fetch-utils.js";
+import { EngineFetchError, fetchWithRetry } from "./fetch-utils.js";
 
 /** DeepL (free or pro API). Requires an API key. */
 export interface DeepLEngineOptions {
@@ -46,6 +46,9 @@ export function createDeepLEngine(opts: DeepLEngineOptions): Engine {
     async translate(req) {
       const { pair, segments } = req;
       if (segments.length === 0) return { segments: [] };
+      if (segments.every((s) => s.text.trim().length === 0)) {
+        return { segments: segments.map((s) => ({ id: s.id, text: s.text })) };
+      }
       const params = new URLSearchParams();
       params.set("target_lang", pair.target.toUpperCase());
       if (pair.source && pair.source !== "auto") {
@@ -66,16 +69,27 @@ export function createDeepLEngine(opts: DeepLEngineOptions): Engine {
       );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as DeepLResponse;
-        throw new TranslationError(
+        throw new EngineFetchError(
           `DeepL HTTP ${res.status}: ${body.message ?? ""}`,
           "deepl",
+          "http",
+          res.status,
         );
       }
       const json = (await res.json()) as DeepLResponse;
-      const out: TranslatedSegment[] = segments.map((seg, i) => ({
-        id: seg.id,
-        text: json.translations?.[i]?.text ?? seg.text,
-      }));
+      const out: TranslatedSegment[] = segments.map((seg, i) => {
+        if (seg.text.trim().length === 0) {
+          return { id: seg.id, text: seg.text };
+        }
+        const translation = json.translations?.[i]?.text;
+        if (translation === undefined) {
+          throw new TranslationError(
+            `DeepL returned no translation for segment ${seg.id}`,
+            "deepl",
+          );
+        }
+        return { id: seg.id, text: translation };
+      });
       return { segments: out };
     },
   };

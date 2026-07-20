@@ -38,6 +38,11 @@ export default defineContentScript({
     let rescanTimer: number | null = null;
     let routeTimer: number | null = null;
     let processedNodes = new Set<Element>();
+    // If a route change fires while a translate/rescan is in flight (busy),
+    // we defer the route re-translate until the in-flight work releases `busy`.
+    // `routePending` is a single boolean, so multiple route changes during one
+    // in-flight operation coalesce into one re-run — no infinite loops.
+    let routePending = false;
     // ---------- helpers ----------
     const refreshSettings = async (next?: Settings) => {
       settings = next ?? await readSettings();
@@ -100,6 +105,8 @@ export default defineContentScript({
         showToast(`Lumen: ${(err as Error).message}`);
       } finally {
         busy = false;
+        // If a route change was deferred while we were busy, re-run it now.
+        maybeFlushRoutePending();
       }
     }
 
@@ -118,16 +125,36 @@ export default defineContentScript({
 
     // SPA route changes: wrap history methods + listen for popstate. On route
     // change the whole page typically re-renders, so we debounce a full
-    // re-translation (clear stale wrappers + reset processed set).
+    // re-translation (clear stale wrappers + reset processed set). If a route
+    // change fires while a translate/rescan is in flight, we defer the
+    // re-translate via `routePending` and flush it when the in-flight work
+    // finishes (see maybeFlushRoutePending).
     function onRouteChange() {
       if (!translated) return;
       if (routeTimer) window.clearTimeout(routeTimer);
       routeTimer = window.setTimeout(() => {
-        clearBilingual();
-        translated = false;
-        processedNodes.clear();
-        void translatePage();
+        routeTimer = null;
+        if (busy) {
+          // Defer: the in-flight translate/rescan will call
+          // maybeFlushRoutePending from its `finally` and re-run runRouteChange.
+          routePending = true;
+          return;
+        }
+        void runRouteChange();
       }, 400);
+    }
+
+    async function runRouteChange() {
+      clearBilingual();
+      translated = false;
+      processedNodes.clear();
+      await translatePage();
+    }
+
+    function maybeFlushRoutePending() {
+      if (!routePending) return;
+      routePending = false;
+      void runRouteChange();
     }
 
     function patchHistory() {
@@ -177,6 +204,10 @@ export default defineContentScript({
         showToast(`Lumen: ${(err as Error).message}`);
       } finally {
         busy = false;
+        // If a route change was deferred while we were busy, re-run it now.
+        // Only re-runs once per deferred route change (routePending is a single
+        // boolean, not a counter), so this cannot loop unbounded.
+        maybeFlushRoutePending();
       }
     }
 

@@ -1,4 +1,5 @@
 import type { Engine, Settings } from "@lumen/core";
+import { getEngineConfig } from "@lumen/core";
 import {
   createGoogleEngine,
   createMicrosoftEngine,
@@ -16,7 +17,7 @@ import {
  */
 export function buildEngine(settings: Settings): Engine {
   const id = settings.activeEngineId;
-  const cfg = (settings.engines[id] ?? {}) as Record<string, unknown>;
+  const cfg = getEngineConfig(settings, id);
 
   switch (id) {
     case "google":

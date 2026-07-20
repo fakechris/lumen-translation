@@ -6,6 +6,14 @@ function seg(id: string, text: string): Segment {
   return { id, text };
 }
 
+function segWithContext(
+  id: string,
+  text: string,
+  context?: Segment["context"],
+): Segment {
+  return { id, text, context };
+}
+
 describe("normalizeForDedup", () => {
   it("trims and collapses internal whitespace", () => {
     expect(normalizeForDedup("  hello   world  ")).toBe("hello world");
@@ -97,5 +105,51 @@ describe("dedupeSegments normalization", () => {
     const { unique, restore } = dedupeSegments([]);
     expect(unique).toEqual([]);
     expect(restore([])).toEqual([]);
+  });
+});
+
+describe("dedupeSegments context-aware", () => {
+  it("keeps same text with different contexts separate", () => {
+    const segments = [
+      segWithContext("1", "bank", { prev: "river" }),
+      segWithContext("2", "bank", { prev: "money" }),
+    ];
+    const { unique } = dedupeSegments(segments);
+    expect(unique.map((s) => s.id).sort()).toEqual(["1", "2"]);
+  });
+
+  it("merges same text with identical context", () => {
+    const segments = [
+      segWithContext("1", "bank", { prev: "river" }),
+      segWithContext("2", "bank", { prev: "river" }),
+    ];
+    const { unique, restore } = dedupeSegments(segments);
+    expect(unique.map((s) => s.id)).toEqual(["1"]);
+    const restored = restore([{ id: "1", text: "河岸" }]);
+    expect(restored.map((r) => r.text)).toEqual(["河岸", "河岸"]);
+    expect(restored.map((r) => r.cached)).toEqual([false, true]);
+  });
+
+  it("merges same text when both lack context (backward compatible)", () => {
+    const segments = [seg("1", "bank"), seg("2", "bank")];
+    const { unique } = dedupeSegments(segments);
+    expect(unique.map((s) => s.id)).toEqual(["1"]);
+  });
+
+  it("keeps mixed context/no-context groups separate", () => {
+    const segments = [
+      seg("1", "bank"),
+      segWithContext("2", "bank", { prev: "river" }),
+      segWithContext("3", "bank", { next: "account" }),
+    ];
+    const { unique, restore } = dedupeSegments(segments);
+    expect(unique.map((s) => s.id).sort()).toEqual(["1", "2", "3"]);
+    const restored = restore([
+      { id: "1", text: "银行" },
+      { id: "2", text: "河岸" },
+      { id: "3", text: "银行" },
+    ]);
+    expect(restored.map((r) => r.text)).toEqual(["银行", "河岸", "银行"]);
+    expect(restored.map((r) => r.cached)).toEqual([false, false, false]);
   });
 });

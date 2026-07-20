@@ -2,6 +2,15 @@ import { describe, it, expect, vi } from "vitest";
 import type { TranslatedSegment } from "@lumen/core";
 import { TranslationError } from "@lumen/core";
 import { sseDeltas, parsePartialSegments, createOpenAIEngine } from "../openai.js";
+import {
+  createGoogleEngine,
+  createMicrosoftEngine,
+  createDeepLEngine,
+  fetchWithRetry,
+  EngineFetchError,
+  createProviderEngine,
+  PROVIDER_CATALOG,
+} from "../index.js";
 
 /** Build a ReadableStream that enqueues the given string chunks then closes. */
 function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
@@ -155,6 +164,178 @@ describe("createOpenAIEngine.translateStream (multi-segment incremental)", () =>
       ).rejects.toBeInstanceOf(TranslationError);
     } finally {
       vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("free MT engines fail loudly", () => {
+  it("Google throws on non-2xx instead of returning source text", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response("Bad Gateway", { status: 502 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const engine = createGoogleEngine();
+      await expect(
+        engine.translate({
+          pair: { source: "en", target: "zh" },
+          segments: [{ id: "1", text: "hello" }],
+        }),
+      ).rejects.toBeInstanceOf(EngineFetchError);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("Google preserves empty/whitespace source text without calling the API", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response("Bad Gateway", { status: 502 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const engine = createGoogleEngine();
+      const result = await engine.translate({
+        pair: { source: "en", target: "zh" },
+        segments: [
+          { id: "1", text: "" },
+          { id: "2", text: "   " },
+          { id: "3", text: "\n" },
+        ],
+      });
+      expect(result.segments).toEqual([
+        { id: "1", text: "" },
+        { id: "2", text: "   " },
+        { id: "3", text: "\n" },
+      ]);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("Google throws on empty response data instead of returning source text", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const engine = createGoogleEngine();
+      await expect(
+        engine.translate({
+          pair: { source: "en", target: "zh" },
+          segments: [{ id: "1", text: "hello" }],
+        }),
+      ).rejects.toThrow(/empty translation/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("Microsoft throws when a translation is missing", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify([]), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const engine = createMicrosoftEngine();
+      await expect(
+        engine.translate({
+          pair: { source: "en", target: "zh" },
+          segments: [{ id: "1", text: "hello" }],
+        }),
+      ).rejects.toThrow(/no translation/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("DeepL throws when a translation is missing", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ translations: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const engine = createDeepLEngine({ apiKey: "key" });
+      await expect(
+        engine.translate({
+          pair: { source: "en", target: "zh" },
+          segments: [{ id: "1", text: "hello" }],
+        }),
+      ).rejects.toThrow(/no translation/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("fetchWithRetry", () => {
+  it("retries on 429 and then succeeds", async () => {
+    const okResponse = new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+    });
+    const fetchMock = vi.fn(async () => okResponse);
+    fetchMock.mockResolvedValueOnce(
+      new Response("rate limited", {
+        status: 429,
+        headers: { "Retry-After": "0" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const res = await fetchWithRetry(
+        "https://example.com",
+        { method: "GET" },
+        { engineId: "test", maxRetries: 1, retryBaseMs: 0 },
+      );
+      expect(res.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("createProviderEngine authHeader/authTemplate", () => {
+  it("uses a custom auth header template when configured", async () => {
+    const testPreset = {
+      id: "test-auth",
+      label: "Test Auth",
+      endpoint: "https://test.example/v1/chat/completions",
+      model: "m",
+      models: ["m"],
+      needsKey: true,
+      authHeader: "X-API-Key",
+      authTemplate: "ApiKey {key}",
+    };
+    const originalCatalog = [...PROVIDER_CATALOG];
+    PROVIDER_CATALOG.length = 0;
+    PROVIDER_CATALOG.push(...originalCatalog, testPreset);
+
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: "translated" } }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const engine = createProviderEngine("test-auth", { apiKey: "secret" });
+      expect(engine).toBeDefined();
+      const result = await engine!.translate({
+        pair: { source: "en", target: "zh" },
+        segments: [{ id: "1", text: "hi" }],
+      });
+      expect(result.segments[0].text).toBe("translated");
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      const headers = init.headers as Record<string, string>;
+      expect(headers["X-API-Key"]).toBe("ApiKey secret");
+      expect(headers["Authorization"]).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+      PROVIDER_CATALOG.length = 0;
+      PROVIDER_CATALOG.push(...originalCatalog);
     }
   });
 });
