@@ -91,7 +91,7 @@ jobs:
             echo "## Quick start"
             echo "1. Download \`lumen-chrome.zip\`, unzip, load unpacked in chrome://extensions"
             echo "2. Or download \`lumen.user.js\` and install in Tampermonkey"
-            echo "3. Alt+Q translate page, Alt+S selection, Alt+I input box, Alt+hover paragraph"
+            echo "3. Alt+Q translate page, Alt+S selection, Alt+hover paragraph"
           } > release-notes.md
 
       - name: Create GitHub Release
@@ -106,4 +106,4 @@ jobs:
             artifacts/Lumen.popclipextz
             artifacts/lumen-mobile-web.tar.gz
             artifacts/lumen-chrome-unpacked/**
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true

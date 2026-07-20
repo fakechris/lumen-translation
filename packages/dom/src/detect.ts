@@ -16,10 +16,6 @@ const SKIP_TAGS = new Set([
   "TEXTAREA",
   "SELECT",
   "BUTTON",
-  "CODE",
-  "KBD",
-  "SAMP",
-  "VAR",
   "PRE",
   "TEMPLATE",
   "LUMEN-TRANSLATION",
@@ -69,7 +65,73 @@ const INLINE_TAGS = new Set([
   "SPAN",
   "TIME",
   "LABEL",
+  "CODE",
+  "KBD",
+  "SAMP",
+  "VAR",
 ]);
+
+/**
+ * Attributes that are safe to carry from the original DOM onto rebuilt inline
+ * elements. Anything outside this set (notably `on*` event handlers,
+ * `class`, `style`, and `data-lumen-*`) is dropped. This is the trust boundary
+ * that prevents attribute-replay XSS during bilingual rendering.
+ */
+const SAFE_ATTR_ALLOWLIST = new Set([
+  "href",
+  "src",
+  "title",
+  "alt",
+  "lang",
+  "dir",
+  "rel",
+  "target",
+  "type",
+  "cite",
+  "datetime",
+  "abbr",
+  "download",
+  "hreflang",
+  "name",
+]);
+
+/** Allowlisted attributes whose values are URLs and must be scheme-checked. */
+const URL_ATTRS = new Set(["href", "src", "cite"]);
+
+/** URI schemes that can execute script or smuggle active content. */
+const UNSAFE_URI_SCHEME = /^\s*(?:javascript|data|vbscript):/i;
+
+function isUnsafeUrl(value: string): boolean {
+  return UNSAFE_URI_SCHEME.test(value);
+}
+
+/** Elements we never recreate during render, even if present in a template. */
+const DANGEROUS_RENDER_TAGS = new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "link",
+  "meta",
+  "base",
+]);
+
+/**
+ * Filter a raw attribute map down to the safe allowlist, dropping `on*`
+ * handlers and unsafe URI schemes. Used both when snapshotting the source and
+ * when re-applying attributes on rebuild (defense in depth).
+ */
+function safeAttrs(source: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [rawName, value] of Object.entries(source)) {
+    const name = rawName.toLowerCase();
+    if (!SAFE_ATTR_ALLOWLIST.has(name)) continue;
+    if (URL_ATTRS.has(name) && isUnsafeUrl(value)) continue;
+    out[name] = value;
+  }
+  return out;
+}
 
 export interface DetectionOptions {
   root?: Element | Document;
@@ -120,6 +182,8 @@ export function detectParagraphs(opts: DetectionOptions = {}): DetectedParagraph
 
   if (roots.length === 0) roots.push(root as Element);
 
+  const hasLayout = detectLayoutAvailable(roots[0]);
+
   const out: DetectedParagraph[] = [];
   const seen = new WeakSet<Element>();
 
@@ -130,11 +194,17 @@ export function detectParagraphs(opts: DetectionOptions = {}): DetectedParagraph
       if (excludeMatcher?.(el)) return "skip";
       // Skip elements we already translated into.
       if (el.tagName === "LUMEN-TRANSLATION") return "skip";
+      // Cheap attribute-based visibility check: prunes whole hidden subtrees
+      // without the cost of getComputedStyle.
+      if (isAttrHidden(el)) return "skip";
       // If this element has a block child that is itself a paragraph root,
       // recurse rather than taking the whole subtree.
       const directBlock = hasBlockChild(el);
       const ownText = ownOrLeafText(el);
       if (!directBlock && ownText && ownText.trim().length >= minLen) {
+        // Only run the expensive computed-style / layout checks on genuine
+        // paragraph candidates, not on every node in the tree.
+        if (isComputedHidden(el, hasLayout)) return "skip";
         seen.add(el);
         const id = el.getAttribute("data-lumen-id") ?? nextId();
         el.setAttribute("data-lumen-id", id);
@@ -164,18 +234,94 @@ function walk(
   root: Element,
   visit: (el: Element) => "skip" | "recurse" | void,
 ): void {
-  // Depth-first traversal using element children.
+  // Depth-first traversal using element children, descending into open shadow
+  // roots so we detect content projected via web components.
   const stack: Element[] = [root];
   while (stack.length) {
     const el = stack.pop()!;
     const action = visit(el);
     if (action === "skip") continue;
-    // Push children in reverse so we visit in document order.
     const children = el.children;
+    // Push light children first, then shadow children, so that after LIFO
+    // popping the open shadow content is visited before the light children.
     for (let i = children.length - 1; i >= 0; i--) {
       stack.push(children[i]);
     }
+    const shadow = openShadowRoot(el);
+    if (shadow) {
+      const shadowChildren = shadow.children;
+      for (let i = shadowChildren.length - 1; i >= 0; i--) {
+        stack.push(shadowChildren[i]);
+      }
+    }
   }
+}
+
+/** The element's shadow root if it is open (never closed roots). */
+function openShadowRoot(el: Element): ShadowRoot | null {
+  const shadow = (el as Element & { shadowRoot?: ShadowRoot | null }).shadowRoot;
+  return shadow && shadow.mode === "open" ? shadow : null;
+}
+
+/**
+ * Yield every descendant element under `root`, descending into open shadow
+ * roots. Useful for callers that need a flat element list including web
+ * component internals.
+ */
+export function* deepDescendants(root: Element): Generator<Element> {
+  const stack: Element[] = [];
+  const pushSubtree = (el: Element): void => {
+    const children = el.children;
+    for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
+    const shadow = openShadowRoot(el);
+    if (shadow) {
+      const shadowChildren = shadow.children;
+      for (let i = shadowChildren.length - 1; i >= 0; i--) {
+        stack.push(shadowChildren[i]);
+      }
+    }
+  };
+  pushSubtree(root);
+  while (stack.length) {
+    const el = stack.pop()!;
+    yield el;
+    pushSubtree(el);
+  }
+}
+
+/** Attribute-only hidden check (cheap, safe to run on every node). */
+function isAttrHidden(el: Element): boolean {
+  return el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true";
+}
+
+/**
+ * Computed-style + layout hidden check. Only call on paragraph candidates:
+ * getComputedStyle and getBoundingClientRect are comparatively expensive.
+ */
+function isComputedHidden(el: Element, hasLayout: boolean): boolean {
+  const view = el.ownerDocument?.defaultView ?? null;
+  if (view) {
+    const style = view.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") return true;
+  }
+  if (hasLayout) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the environment performs layout. In headless DOMs (jsdom) every
+ * getBoundingClientRect() is zero, so the zero-area check would wrongly hide
+ * everything; gate that check behind this probe.
+ */
+function detectLayoutAvailable(node: Element | undefined): boolean {
+  const doc = node?.ownerDocument ?? null;
+  const el = doc?.documentElement;
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 || rect.height > 0;
 }
 
 function hasBlockChild(el: Element): boolean {
@@ -231,13 +377,9 @@ export function serializeInline(el: Element): InlineNode[] {
 function snapshotAttrs(el: Element): Record<string, string> {
   const attrs: Record<string, string> = {};
   for (const attr of el.attributes) {
-    // Skip class/style/data-lumen-* to keep the placeholder stable.
-    if (attr.name === "class" || attr.name === "style" || attr.name.startsWith("data-lumen-")) {
-      continue;
-    }
     attrs[attr.name] = attr.value;
   }
-  return attrs;
+  return safeAttrs(attrs);
 }
 
 export function inlineToText(inline: InlineNode[]): string {
@@ -271,10 +413,13 @@ export function renderTranslatedFragment(
     if (open) {
       const idx = Number(open[1]);
       const node = openByIndex.get(idx);
-      const tag = node?.tag ?? "span";
+      const rawTag = node?.tag ?? "span";
+      const tag = DANGEROUS_RENDER_TAGS.has(rawTag) ? "span" : rawTag;
       const el = doc.createElement(tag);
       if (node?.attrs) {
-        for (const [k, v] of Object.entries(node.attrs)) el.setAttribute(k, v);
+        for (const [k, v] of Object.entries(safeAttrs(node.attrs))) {
+          el.setAttribute(k, v);
+        }
       }
       if (stack.length) stack[stack.length - 1].el.appendChild(el);
       else frag.appendChild(el);

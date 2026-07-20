@@ -1,4 +1,5 @@
 import type { SyncBackend, SyncSnapshot } from "./types.js";
+import { validateRemoteUrl } from "./url-guard.js";
 
 function buildFileUrl(url: string, path?: string): string {
   const base = url.replace(/\/+$/, "");
@@ -21,6 +22,8 @@ export function createWebDavBackend(opts: {
   password: string;
   path?: string;
 }): SyncBackend {
+  // SSRF guard: refuse loopback/private/link-local targets before any fetch.
+  const urlError = validateRemoteUrl(opts.url);
   const fileUrl = buildFileUrl(opts.url, opts.path);
   const authHeader = basicAuth(opts.username, opts.password);
   const headers = { Authorization: authHeader };
@@ -28,6 +31,7 @@ export function createWebDavBackend(opts: {
   return {
     id: "webdav",
     async pull(): Promise<SyncSnapshot | null> {
+      if (urlError) throw new Error(urlError);
       const res = await fetch(fileUrl, { method: "GET", headers });
       if (res.status === 404) return null;
       if (!res.ok) {
@@ -36,6 +40,7 @@ export function createWebDavBackend(opts: {
       return (await res.json()) as SyncSnapshot;
     },
     async push(snapshot: SyncSnapshot): Promise<void> {
+      if (urlError) throw new Error(urlError);
       const res = await fetch(fileUrl, {
         method: "PUT",
         headers: {
@@ -49,6 +54,7 @@ export function createWebDavBackend(opts: {
       }
     },
     async test(): Promise<string | null> {
+      if (urlError) return urlError;
       try {
         const res = await fetch(fileUrl, { method: "OPTIONS", headers });
         return res.ok ? null : `${res.status} ${res.statusText}`;

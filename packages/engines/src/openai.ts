@@ -132,41 +132,104 @@ export function createOpenAIEngine(
         yield { id: segId, text: acc.trim() };
         return;
       }
-      // Multi-segment: buffer the full response then emit parsed parts.
+      // Multi-segment: stream incrementally. After each delta, re-parse the
+      // accumulated text into per-segment chunks and yield only the segments
+      // whose text changed since the last emission. This gives the caller
+      // true per-segment streaming progress instead of a single end-of-stream
+      // burst.
+      const seen = new Map<string, string>();
       let full = "";
-      for await (const delta of sseDeltas(res.body)) full += delta;
-      for (const part of parseBatchResponse(full, segments)) yield part;
+      for await (const delta of sseDeltas(res.body)) {
+        full += delta;
+        for (const part of parsePartialSegments(full, segments)) {
+          if (seen.get(part.id) !== part.text) {
+            seen.set(part.id, part.text);
+            yield { id: part.id, text: part.text };
+          }
+        }
+      }
+      // Final pass: make sure every requested segment is emitted at least
+      // once with trimmed text, even if the model dropped a marker.
+      for (const seg of segments) {
+        const text = (seen.get(seg.id) ?? "").trim();
+        if (seen.get(seg.id) !== text) {
+          seen.set(seg.id, text);
+          yield { id: seg.id, text };
+        }
+      }
     },
   };
 }
 
-/** Read OpenAI SSE `data:` lines and yield concatenated content deltas. */
-async function* sseDeltas(body: ReadableStream<Uint8Array>): AsyncIterable<string> {
+/**
+ * Read OpenAI SSE `data:` lines from a stream and yield concatenated content
+ * deltas. Handles three correctness concerns:
+ *
+ * - Trailing buffer flush: when the stream closes with a final event that
+ *   wasn't terminated by a newline, that event is still parsed and emitted.
+ * - Error events: if a `data:` payload carries an `error` field, a
+ *   {@link TranslationError} is thrown so the caller can surface it instead
+ *   of silently ending the stream.
+ * - `[DONE]` sentinel: terminates the stream.
+ */
+export async function* sseDeltas(
+  body: ReadableStream<Uint8Array>,
+): AsyncIterable<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let done = false;
+
+  const handleLine = (raw: string): string | null => {
+    const line = raw.trim();
+    if (!line || !line.startsWith("data:")) return null;
+    const payload = line.slice(5).trim();
+    if (payload === "[DONE]") {
+      done = true;
+      return null;
+    }
+    let json: {
+      choices?: Array<{ delta?: { content?: string } }>;
+      error?: { message?: string };
+    };
+    try {
+      json = JSON.parse(payload);
+    } catch {
+      // partial JSON; keep buffering for the next chunk
+      return null;
+    }
+    if (json.error) {
+      throw new TranslationError(
+        `OpenAI stream error: ${json.error.message ?? ""}`,
+        "openai",
+      );
+    }
+    return json.choices?.[0]?.delta?.content ?? null;
+  };
+
   try {
     while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
+      const { value, done: readerDone } = await reader.read();
+      if (readerDone) {
+        // Final decoder flush so any trailing multi-byte sequence resolves.
+        buffer += decoder.decode();
+        break;
+      }
       buffer += decoder.decode(value, { stream: true });
       let nl: number;
       while ((nl = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, nl).trim();
+        const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
-        if (!line || !line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (payload === "[DONE]") return;
-        try {
-          const json = JSON.parse(payload) as {
-            choices?: Array<{ delta?: { content?: string } }>;
-          };
-          const delta = json.choices?.[0]?.delta?.content;
-          if (delta) yield delta;
-        } catch {
-          // partial JSON; keep buffering
-        }
+        const delta = handleLine(line);
+        if (delta) yield delta;
+        if (done) return;
       }
+    }
+    // Flush a trailing partial event (no final newline) so the last segment
+    // produced by the server isn't lost.
+    if (buffer.length > 0) {
+      const delta = handleLine(buffer);
+      if (delta) yield delta;
     }
   } finally {
     reader.releaseLock();
@@ -219,4 +282,27 @@ function parseBatchResponse(content: string, segments: Segment[]): TranslatedSeg
     id: seg.id,
     text: map.get(seg.id) ?? "",
   }));
+}
+
+/**
+ * Parse a partial (mid-stream) batched response into per-segment chunks.
+ * Unlike {@link parseBatchResponse}, this never falls back to dumping the
+ * whole content into the first segment, because mid-stream we may simply not
+ * have received the first marker yet. The trailing (still-streaming) segment
+ * is included with whatever text has arrived so far.
+ */
+export function parsePartialSegments(
+  content: string,
+  segments: Segment[],
+): TranslatedSegment[] {
+  if (segments.length === 1) {
+    return [{ id: segments[0].id, text: content.trim() }];
+  }
+  const out: TranslatedSegment[] = [];
+  const re = /\[\[([^\]]+)\]\]\n?([\s\S]*?)(?=\n\[\[|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    out.push({ id: m[1], text: m[2].trim() });
+  }
+  return out;
 }

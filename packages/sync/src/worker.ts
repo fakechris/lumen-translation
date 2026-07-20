@@ -1,4 +1,5 @@
 import type { SyncBackend, SyncSnapshot } from "./types.js";
+import { validateRemoteUrl } from "./url-guard.js";
 
 function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");
@@ -9,6 +10,8 @@ export function createWorkerBackend(opts: {
   token: string;
   deviceId?: string;
 }): SyncBackend {
+  // SSRF guard: refuse loopback/private/link-local targets before any fetch.
+  const urlError = validateRemoteUrl(opts.url);
   const base = trimTrailingSlash(opts.url);
   const authHeader = `Bearer ${opts.token}`;
   const headers = { Authorization: authHeader };
@@ -16,6 +19,7 @@ export function createWorkerBackend(opts: {
   return {
     id: "worker",
     async pull(): Promise<SyncSnapshot | null> {
+      if (urlError) throw new Error(urlError);
       const res = await fetch(`${base}/snapshot`, { method: "GET", headers });
       if (res.status === 404) return null;
       if (!res.ok) {
@@ -24,6 +28,7 @@ export function createWorkerBackend(opts: {
       return (await res.json()) as SyncSnapshot;
     },
     async push(snapshot: SyncSnapshot): Promise<void> {
+      if (urlError) throw new Error(urlError);
       const res = await fetch(`${base}/snapshot`, {
         method: "PUT",
         headers: {
@@ -37,6 +42,7 @@ export function createWorkerBackend(opts: {
       }
     },
     async test(): Promise<string | null> {
+      if (urlError) return urlError;
       try {
         const res = await fetch(`${base}/health`, { method: "GET", headers });
         return res.ok ? null : `${res.status} ${res.statusText}`;

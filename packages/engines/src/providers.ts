@@ -125,10 +125,13 @@ export const PROVIDER_CATALOG: ProviderPreset[] = [
     id: "spark",
     label: "讯飞星火 Spark",
     endpoint: "https://spark-api-open.xf-yun.com/v1/chat/completions",
-    model: "generalv3.5",
-    models: ["4.0Ultra", "generalv3.5", "generalv3", "general", "spark-v3.5"],
+    // `generalv3.5` pointed at the Spark Max tier, which iFlytek retired on
+    // 2026-03-10 (merged into Ultra). `4.0Ultra` is the current flagship and
+    // is valid against the OpenAI-compatible endpoint above.
+    model: "4.0Ultra",
+    models: ["4.0Ultra", "max-32k", "generalv3.5", "generalv3", "pro-128k", "lite"],
     needsKey: true,
-    docs: "https://console.xfyun.cn/services/bm35",
+    docs: "https://www.xfyun.cn/doc/spark/HTTP%E8%B0%83%E7%94%A8%E6%96%87%E6%A1%A3.html",
   },
   {
     id: "baichuan",
@@ -217,8 +220,21 @@ export function createProviderEngine(
       : preset.endpoint);
 
   const headers: Record<string, string> = { ...(preset.headers ?? {}) };
+
+  // If the preset declares a custom auth header template, build it from the
+  // user's API key and pass it through `headers`. In that case we deliberately
+  // do NOT forward the apiKey to createOpenAIEngine, so it won't also emit a
+  // default `Authorization: Bearer <key>` that would conflict with the custom
+  // header (e.g. `X-API-Key` for some providers).
+  let apiKeyForEngine = opts.apiKey;
+  if (preset.authTemplate && opts.apiKey) {
+    const headerName = preset.authHeader ?? "Authorization";
+    headers[headerName] = preset.authTemplate.replace("{key}", opts.apiKey);
+    apiKeyForEngine = undefined;
+  }
+
   const openaiOpts: OpenAIEngineOptions = {
-    apiKey: opts.apiKey,
+    apiKey: apiKeyForEngine,
     endpoint,
     model: opts.model ?? preset.model,
     temperature: opts.temperature,

@@ -1,6 +1,7 @@
 import type { Settings } from "@lumen/core";
 import type { SyncBackend, SyncSnapshot } from "./types.js";
 import { mergeSettings } from "./merge.js";
+import { redactSecrets, restoreSecrets } from "./snapshot.js";
 
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -34,9 +35,10 @@ export async function syncOnce(
   const remote = await backend.pull();
 
   if (remote === null) {
+    // Never upload plaintext credentials; the remote copy is redacted.
     const snapshot: SyncSnapshot = {
       version: 1,
-      settings: local,
+      settings: redactSecrets(local),
       updatedAt: new Date().toISOString(),
       device: opts.device,
     };
@@ -44,16 +46,21 @@ export async function syncOnce(
     return { before: local, after: local, direction: "pushed" };
   }
 
-  if (deepEqual(local, remote.settings)) {
+  // The remote snapshot is redacted, so reinstate this device's secrets before
+  // comparing/merging — otherwise stripped fields would look like a diff and a
+  // remote-wins merge would wipe our local credentials.
+  const remoteSettings = restoreSecrets(remote.settings, local);
+
+  if (deepEqual(local, remoteSettings)) {
     return { before: local, after: local, direction: "noop" };
   }
 
   const strategy = opts.strategy ?? "merge-rules";
-  const merged = mergeSettings(local, remote.settings, strategy);
+  const merged = restoreSecrets(mergeSettings(local, remoteSettings, strategy), local);
 
   const snapshot: SyncSnapshot = {
     version: 1,
-    settings: merged,
+    settings: redactSecrets(merged),
     updatedAt: new Date().toISOString(),
     device: opts.device,
   };

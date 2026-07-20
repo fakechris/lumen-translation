@@ -77,12 +77,12 @@ A `CaptionAdapter` framework (`@lumen/meetings`) polls/observes each platform's 
 
 ### Document file translation
 
-The file-translator page handles plain-text and e-book formats with bilingual output and download:
+The file-translator page handles plain-text and e-book formats. ePub is parsed and bilingual-rendered for reading; download is available for TXT, Markdown, and HTML:
 
 - **TXT**
 - **Markdown** (bilingual render, structure preserved)
 - **HTML** (DOM-aware bilingual serialization)
-- **ePub** (unzipped via jszip, OPF spine walked, each chapter bilingual-rendered and re-packed)
+- **ePub** (unzipped via jszip, OPF spine walked, each chapter bilingual-rendered for reading)
 
 ### Image translation
 
@@ -93,7 +93,7 @@ The file-translator page handles plain-text and e-book formats with bilingual ou
 
 - **WebDAV** backend (any WebDAV server: Nextcloud,坚果云, Synology, etc.).
 - **Self-hosted Worker** backend (`apps/worker`, Cloudflare Workers + KV, Bearer auth, `/health` + `/snapshot` GET/PUT).
-- Three merge strategies (`merge-rules`, `merge-settings`, full overwrite) via `syncOnce`.
+- Three merge strategies (`local-wins`, `remote-wins`, `merge-rules`) via `syncOnce`.
 - Configure and test connection from the options sync panel.
 
 ### Internationalization
@@ -140,7 +140,6 @@ LLM features:
 |---|---|
 | `Alt+Q` | Translate / clear current page |
 | `Alt+S` | Translate selection |
-| `Alt+K` | Open popup |
 | `Alt+Hover` | Translate hovered block |
 
 Plus right-click context-menu entries for page, selection, and editable fields.
