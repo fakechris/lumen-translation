@@ -64,7 +64,7 @@ export const PROVIDER_CATALOG: ProviderPreset[] = [
   },
   {
     id: "minimax",
-    label: "MiniMax 海螺 AI",
+    label: "MiniMax 大模型（文本）",
     endpoint: "https://api.minimaxi.com/v1/text/chatcompletion_v2",
     overseasEndpoint: "https://api.minimax.chat/v1/text/chatcompletion_v2",
     model: "MiniMax-Text-01",

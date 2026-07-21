@@ -61,7 +61,9 @@ function composeSignals(
   external: AbortSignal | undefined,
   timeoutMs: number,
 ): { signal: AbortSignal | undefined; cleanup: () => void } {
-  if (timeoutMs <= 0) return { signal: external, cleanup: () => {} };
+  if (timeoutMs <= 0) {
+    return { signal: external, cleanup: () => {} };
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
   if (external) {

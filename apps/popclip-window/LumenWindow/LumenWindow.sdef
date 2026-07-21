@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="LumenWindow">
+  <suite name="LumenWindow Suite" code="LWsf" description="LumenWindow scripting">
+    <command name="translate" code="LWsftran" description="Translate text and show a window">
+      <cocoa class="LumenWindow.TranslateCommand"/>
+      <direct-parameter description="The text to translate" type="text"/>
+      <result type="text" description="The translated text"/>
+    </command>
+  </suite>
+</dictionary>

@@ -3,9 +3,10 @@ import { TranslationError } from "@lumen/core";
 import { EngineFetchError, fetchWithRetry } from "./fetch-utils.js";
 
 /** Query params supported by the free google translate endpoint. */
-interface GoogleRpcResponse {
-  data?: Array<Array<{ 0?: string }>>;
-}
+// The `translate_a/single?client=gtx&dt=t` endpoint returns a nested array:
+//   [[["translated","original",null,null,1], ...], null, "srcLang", ...]
+// The translation is the concatenation of `json[0][i][0]` for each sentence.
+type GoogleRpcResponse = unknown[][];
 
 function isEmptyText(text: string): boolean {
   return text.trim().length === 0;
@@ -85,8 +86,12 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
           throw new EngineFetchError(`Google HTTP ${res.status}`, "google", "http", res.status);
         }
         const json = (await res.json()) as GoogleRpcResponse;
-        const rows = json.data ?? [];
-        const text = rows.map((row) => row?.[0] ?? "").join("");
+        // json[0] is the array of [translated, original, ...] sentence tuples.
+        const sentences = Array.isArray(json) ? (json[0] as unknown[] | undefined) : undefined;
+        const rows = Array.isArray(sentences) ? sentences : [];
+        const text = rows
+          .map((row) => (Array.isArray(row) ? String(row[0] ?? "") : ""))
+          .join("");
         if (text.trim().length === 0 && batch.some((s) => !isEmptyText(s.text))) {
           throw new TranslationError("Google returned an empty translation response", "google");
         }
