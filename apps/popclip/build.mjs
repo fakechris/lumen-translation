@@ -16,7 +16,7 @@ async function main() {
   mkdirSync(PKG, { recursive: true });
   copyFileSync(resolve(__dirname, "Config.json"), resolve(PKG, "Config.json"));
   copyFileSync(resolve(__dirname, "Lumen.applescript"), resolve(PKG, "Lumen.applescript"));
-  copyFileSync(resolve(ROOT, "apps/extension/public/icon/128.png"), resolve(PKG, "icon.png"));
+  copyFileSync(resolve(__dirname, "icon.png"), resolve(PKG, "icon.png"));
   console.log(`wrote ${PKG}`);
   if (zip) {
     execSync(`cd "${OUT}" && zip -r -X Lumen.popclipextz Lumen.popclipext`, { stdio: "inherit" });
