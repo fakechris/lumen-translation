@@ -7,5 +7,10 @@
       <direct-parameter description="The text to translate" type="text"/>
       <result type="text" description="The translated text"/>
     </command>
+    <command name="configure" code="LWsfseto" description="Apply PopClip option overrides (JSON)">
+      <cocoa class="LumenWindow.ConfigureCommand"/>
+      <direct-parameter description="JSON string with engine/apiKey/model/region/sourceLang/targetLang" type="text"/>
+      <result type="text" description="Status: ok or error"/>
+    </command>
   </suite>
 </dictionary>

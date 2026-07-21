@@ -73,13 +73,43 @@
     },
     {
       "identifier": "engine",
-      "label": "引擎 Engine",
+      "label": "引擎 Provider",
       "type": "multiple",
       "default": "google",
-      "values": ["google", "microsoft"],
+      "values": ["google", "microsoft", "openai", "anthropic", "kimi", "glm", "minimax", "deepseek"],
       "valueLabels": [
         "Google（免费，无需 Key）",
-        "Microsoft（免费，无需 Key）"
+        "Microsoft（免费，无需 Key）",
+        "OpenAI GPT",
+        "Anthropic Claude（via OpenRouter）",
+        "Kimi 月之暗面",
+        "GLM 智谱 BigModel",
+        "MiniMax 大模型",
+        "DeepSeek 深度求索"
+      ]
+    },
+    {
+      "identifier": "apiKey",
+      "label": "API Key（OpenAI/Anthropic/Kimi/GLM/MiniMax/DeepSeek 需要）",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "identifier": "model",
+      "label": "模型 Model（留空用 provider 默认）",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "identifier": "region",
+      "label": "Region（仅 MiniMax 有国内/海外两个 endpoint）",
+      "type": "multiple",
+      "default": "auto",
+      "values": ["auto", "cn", "overseas"],
+      "valueLabels": [
+        "Auto（按系统 locale 自动判断）",
+        "China 国内",
+        "Overseas 海外"
       ]
     }
   ]

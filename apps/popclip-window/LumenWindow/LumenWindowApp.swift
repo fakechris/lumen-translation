@@ -10,6 +10,10 @@
 //     (init, loadWindow, windowDidLoad, windowDidResignKey)
 //
 // PopClip action:  tell application "LumenWindow" to translate "text"
+//
+// LLM providers (configured via Preferences window, opened from the status
+// bar item): Google / Microsoft (free), OpenAI, Anthropic via OpenRouter,
+// Kimi, GLM, MiniMax, DeepSeek. Region (China vs overseas) auto-detected.
 
 import AppKit
 import Foundation
@@ -27,9 +31,28 @@ enum LumenWindowMain {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+  private var statusItem: NSStatusItem!
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     ProcessInfo.processInfo.disableAutomaticTermination("lumen-popclip-window")
     ProcessInfo.processInfo.disableSuddenTermination()
+
+    // Status bar item: since LSUIElement apps have no Dock icon or app menu,
+    // we expose Preferences + Quit via NSStatusItem.
+    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    if let btn = statusItem.button {
+      btn.image = NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Lumen")
+    }
+    let menu = NSMenu()
+    menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+    menu.addItem(NSMenuItem.separator())
+    menu.addItem(withTitle: "Quit LumenWindow", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    menu.items.forEach { $0.target = self }
+    statusItem.menu = menu
+  }
+
+  @objc private func openPreferences() {
+    PreferencesWindowController.show()
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -44,55 +67,66 @@ final class TranslateCommand: NSScriptCommand {
     let text = (directParameter as? String) ?? ""
     let sem = DispatchSemaphore(value: 0)
     var resultTranslation = ""
-    TranslationService.shared.translate(text: text, source: "auto", target: "zh-CN") { result in
-      switch result {
-      case .success(let t): resultTranslation = t
-      case .failure(let e): resultTranslation = "Lumen error: \(e)"
+    var resultEngine = ""
+    let prefs = Preferences.shared
+    let providerLabel = prefs.provider.label
+    TranslationService.shared.translate(text: text) { outcome in
+      switch outcome {
+      case .success(let t):
+        resultTranslation = t
+        resultEngine = providerLabel
+      case .failure(let e):
+        resultTranslation = "Lumen error: \(e)"
+        resultEngine = "error"
       }
       sem.signal()
     }
-    _ = sem.wait(timeout: .now() + 15)
+    _ = sem.wait(timeout: .now() + 30)
     let payload = TranslationPayload(
       source: text, translation: resultTranslation,
-      engine: "google", sourceLang: "auto", targetLang: "zh-CN")
+      engine: resultEngine,
+      sourceLang: prefs.sourceLang, targetLang: prefs.targetLang)
     NSLog("[LumenWindow] cmd about to show, isMain=\(Thread.isMainThread)")
-    // performDefaultImplementation runs on the main thread of the app process
-    // (it is called by Cocoa Scripting). Just call show() directly.
     TranslateWindowController.shared.show(payload: payload)
     NSLog("[LumenWindow] cmd returned from show")
     return resultTranslation
   }
 }
 
-// MARK: - Translation service
+// MARK: - NSScriptCommand for AppleScript `configure` verb
+//
+// Receives a JSON record from PopClip with option overrides
+// (engine/apiKey/model/region/sourceLang/targetLang). Values that are empty
+// strings are treated as "PopClip didn't set this" and ignored, so the
+// LumenWindow Preferences UI remains the source of truth for those fields.
 
-final class TranslationService {
-  static let shared = TranslationService()
-  enum TSResult { case success(String); case failure(String) }
-
-  func translate(text: String, source: String, target: String,
-                 completion: @escaping (TSResult) -> Void) {
-    var comps = URLComponents(string: "https://translate.googleapis.com/translate_a/single")!
-    comps.queryItems = [
-      URLQueryItem(name: "client", value: "gtx"),
-      URLQueryItem(name: "dt", value: "t"),
-      URLQueryItem(name: "sl", value: source),
-      URLQueryItem(name: "tl", value: target),
-      URLQueryItem(name: "q", value: text),
-    ]
-    guard let url = comps.url else { completion(.failure("bad URL")); return }
-    var req = URLRequest(url: url)
-    req.timeoutInterval = 15
-    URLSession.shared.dataTask(with: req) { data, _, err in
-      if let err = err { completion(.failure(err.localizedDescription)); return }
-      guard let data = data,
-            let json = try? JSONSerialization.jsonObject(with: data) as? [Any],
-            let sentences = json.first as? [[Any]] else {
-        completion(.failure("parse failed")); return
-      }
-      let out = sentences.compactMap { $0.first as? String }.joined()
-      completion(.success(out))
-    }.resume()
+final class ConfigureCommand: NSScriptCommand {
+  override func performDefaultImplementation() -> Any? {
+    guard let json = (directParameter as? String)?.data(using: .utf8),
+          let dict = try? JSONSerialization.jsonObject(with: json) as? [String: Any] else {
+      return "error: bad json"
+    }
+    let prefs = Preferences.shared
+    if let v = dict["engine"] as? String, !v.isEmpty {
+      prefs.providerId = v
+    }
+    if let v = dict["apiKey"] as? String, !v.isEmpty, let pid = dict["engine"] as? String {
+      prefs.setApiKey(v, for: pid)
+    }
+    if let v = dict["model"] as? String, !v.isEmpty, let pid = dict["engine"] as? String {
+      prefs.setModel(v, for: pid)
+    }
+    if let v = dict["region"] as? String, !v.isEmpty {
+      prefs.regionOverride = v == "auto" ? nil : v
+    }
+    if let v = dict["sourceLang"] as? String, !v.isEmpty {
+      prefs.sourceLang = v
+    }
+    if let v = dict["targetLang"] as? String, !v.isEmpty {
+      prefs.targetLang = v
+    }
+    NSLog("[LumenWindow] configure applied: engine=\(prefs.providerId) region=\(prefs.regionOverride ?? "auto")")
+    return "ok"
   }
 }
 
@@ -251,6 +285,7 @@ final class TranslateContentView: NSView {
   private let engineLabel = NSTextField(labelWithString: "")
   private let copyButton = NSButton()
   private let speakButton = NSButton()
+  private let closeButton = NSButton()
   private let divider = NSBox()
   private var currentTranslation = ""
   // Guards against recursive scroll sync.
@@ -350,6 +385,15 @@ final class TranslateContentView: NSView {
     engineLabel.textColor = .tertiaryLabelColor
     engineLabel.translatesAutoresizingMaskIntoConstraints = false
 
+    closeButton.bezelStyle = .inline
+    closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close")
+    closeButton.imagePosition = .imageOnly
+    closeButton.font = .systemFont(ofSize: 14)
+    closeButton.target = self
+    closeButton.action = #selector(closeAction)
+    closeButton.translatesAutoresizingMaskIntoConstraints = false
+    closeButton.isBordered = false
+
     copyButton.title = "Copy"
     copyButton.bezelStyle = .inline
     copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy")
@@ -379,6 +423,7 @@ final class TranslateContentView: NSView {
     addSubview(copyButton)
     addSubview(speakButton)
     addSubview(engineLabel)
+    addSubview(closeButton)
 
     let srcC = sourceScrollView.heightAnchor.constraint(equalToConstant: 60)
     let trC = translationScrollView.heightAnchor.constraint(equalToConstant: 120)
@@ -388,7 +433,7 @@ final class TranslateContentView: NSView {
     self.translationHeightC = trC
 
     NSLayoutConstraint.activate([
-      sourceScrollView.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+      sourceScrollView.topAnchor.constraint(equalTo: topAnchor, constant: 28),
       sourceScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       sourceScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       srcC,
@@ -410,7 +455,12 @@ final class TranslateContentView: NSView {
       speakButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 14),
 
       engineLabel.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
-      engineLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+      engineLabel.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 8),
+
+      closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+      closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+      closeButton.widthAnchor.constraint(equalToConstant: 22),
+      closeButton.heightAnchor.constraint(equalToConstant: 22),
     ])
   }
 
@@ -429,6 +479,12 @@ final class TranslateContentView: NSView {
 
   @objc private func speakAction() {
     NSSpeechSynthesizer().startSpeaking(currentTranslation)
+  }
+
+  @objc private func closeAction() {
+    // Close the enclosing window immediately (no need to wait for the
+    // auto-hide timer).
+    self.window?.orderOut(nil)
   }
 
   // MARK: - Linked scrolling

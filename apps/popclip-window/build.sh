@@ -16,14 +16,17 @@ RESOURCES_DIR="${CONTENTS}/Resources"
 rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
-# Compile the SwiftUI source.
+# Compile all Swift sources together.
 swiftc \
   -target arm64-apple-macosx13.0 \
   -sdk "$(xcrun --show-sdk-path)" \
   -parse-as-library \
   -O \
   -o "${MACOS_DIR}/${APP_NAME}" \
-  "${APP_NAME}/${APP_NAME}App.swift"
+  "${APP_NAME}/${APP_NAME}App.swift" \
+  "${APP_NAME}/Preferences.swift" \
+  "${APP_NAME}/LLMService.swift" \
+  "${APP_NAME}/PreferencesWindow.swift"
 
 # Copy the scripting definition (AppleScript `translate` keyword).
 cp "${APP_NAME}/${APP_NAME}.sdef" "${RESOURCES_DIR}/${APP_NAME}.sdef"
