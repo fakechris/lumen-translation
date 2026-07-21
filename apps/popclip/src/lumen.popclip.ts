@@ -1,32 +1,46 @@
-// Lumen Translation PopClip entry.
+// Lumen Translation PopClip entry (module style).
 //
-// Behaviour:
-//   - Reads the selected text from popclip.input.text
-//   - Translates via the configured engine (Google / Microsoft / OpenAI-compat)
-//   - Returns the translated string; PopClip's `after` setting decides whether
-//     to show it in the bar, copy it, or paste it (see Config.json).
-//
-// The script is bundled with esbuild into a single IIFE script.js that runs in
-// PopClip's JavaScriptCore sandbox. A fetch-on-XHR polyfill is installed first
-// so the existing @lumen/engines work unchanged.
+// PopClip loads this as a CommonJS module (Config.json `"module": "script.js"`)
+// and calls the exported `action(input, options)` when the user clicks Lumen.
+// The action translates, then opens the LumenWindow companion app via the
+// `lumenwindow://` URL scheme so the result renders in a Bob-style floating
+// window near the cursor (instead of PopClip's small bar). A fetch-on-axios
+// polyfill is installed at module load so the existing @lumen/engines work.
 
 import { translateAll, type Engine, type Segment } from "@lumen/core";
 import {
   createGoogleEngine,
   createMicrosoftEngine,
-  createOpenAIEngine,
   createProviderEngine,
 } from "@lumen/engines";
 import { installFetchPolyfill } from "./fetch-polyfill.js";
 
+// PopClip runtime globals — provided by the action context, not the test
+// harness. `openUrl` launches a URL via LaunchServices (used to invoke the
+// LumenWindow companion app). The official API name is `openUrl` (lowercase
+// rl), per https://www.popclip.app/dev/js-environment.
+declare const popclip: {
+  openUrl?: (url: string) => void;
+  openURL?: (url: string) => void;
+};
+
+declare const pasteboard: { text: string };
+
+// PopClip provides a global `print()` for debug output (visible in Console.app
+// when EnableExtensionDebug is on, and in the `PopClip run` test harness).
+declare function print(s: string): void;
+
 installFetchPolyfill();
+
+interface PopclipInput {
+  text: string;
+}
 
 interface PopclipOptions {
   targetLang?: string;
   sourceLang?: string;
   engine?: string;
   apiKey?: string;
-  endpoint?: string;
   model?: string;
   showSource?: boolean;
 }
@@ -35,55 +49,109 @@ function buildEngine(opts: PopclipOptions): Engine {
   switch (opts.engine) {
     case "microsoft":
       return createMicrosoftEngine();
-    case "openai":
-      return createOpenAIEngine({
-        apiKey: opts.apiKey || undefined,
-        endpoint: opts.endpoint || undefined,
-        model: opts.model || undefined,
-      });
     case "google":
       return createGoogleEngine();
     default: {
-      // Built-in provider presets: deepseek, glm, kimi, qwen, doubao, minimax, ...
+      if (!opts.apiKey) {
+        throw new Error("this engine needs an API Key. Open Lumen settings and paste your key.");
+      }
       const engine = createProviderEngine(opts.engine ?? "google", {
         apiKey: opts.apiKey,
-        model: opts.model,
+        model: opts.model || undefined,
       });
-      return engine ?? createGoogleEngine();
+      if (!engine) {
+        throw new Error(`unknown engine "${opts.engine}".`);
+      }
+      return engine;
     }
   }
 }
 
-async function main(): Promise<string> {
-  const opts: PopclipOptions = (popclip.options ?? {}) as PopclipOptions;
-  const text = (popclip.input?.text ?? "").trim();
-  if (!text) {
-    popclip.showFailure?.("No text selected");
-    return "";
-  }
+// Small base64 encoder for URL payload (UTF-8 safe). PopClip's JSC has btoa,
+// but it operates on Latin-1 only; encode UTF-8 bytes first.
+function base64Utf8(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
 
-  const engine = buildEngine(opts);
-  const pair = {
-    source: opts.sourceLang || "auto",
-    target: opts.targetLang || "zh",
-  };
-  const segments: Segment[] = [{ id: "s1", text }];
-
+function openWindow(payload: {
+  source: string;
+  translation: string;
+  engine: string;
+  sourceLang: string;
+  targetLang: string;
+}): { ok: boolean; method: string; urlLen: number; err?: string } {
+  const json = JSON.stringify(payload);
+  const url = `lumen-popclip-9j3kx1://show?d=${base64Utf8(json)}`;
+  // Per PopClip docs the canonical name is `openUrl` (lowercase rl).
+  // Fall back to `openURL` defensively in case of undocumented aliasing.
   try {
-    const result = await translateAll(engine, { pair, segments });
-    const translated = result.segments[0]?.text ?? text;
-    if (opts.showSource) {
-      return `${text}\n\n——\n\n${translated}`;
+    if (typeof popclip.openUrl === "function") {
+      popclip.openUrl(url);
+      return { ok: true, method: "popclip.openUrl", urlLen: url.length };
     }
-    return translated;
-  } catch (err) {
-    const message = (err as Error)?.message ?? String(err);
-    popclip.showFailure?.(`Lumen: ${message}`);
-    return `Lumen error: ${message}`;
+    if (typeof popclip.openURL === "function") {
+      popclip.openURL(url);
+      return { ok: true, method: "popclip.openURL", urlLen: url.length };
+    }
+    return {
+      ok: false,
+      method: "none",
+      urlLen: url.length,
+      err: `openUrl=${typeof popclip.openUrl}, openURL=${typeof popclip.openURL}, keys=${Object.keys(popclip).join(",")}`,
+    };
+  } catch (e) {
+    return { ok: false, method: "throw", urlLen: url.length, err: (e as Error)?.message ?? String(e) };
   }
 }
 
-// PopClip awaits the top-level return value of the script.
-void main().then((out) => {
-  if (out) popclip.showText?.(out);
-});
+export const action = async (
+  input: PopclipInput,
+  options: PopclipOptions,
+): Promise<string> => {
+  try {
+    print("[lumen] action start");
+    const opts = options ?? {};
+    const text = (input?.text ?? "").trim();
+    if (!text) {
+      print("[lumen] no text selected");
+      return "Lumen: no text selected";
+    }
+    print(`[lumen] text len=${text.length} engine=${opts.engine} target=${opts.targetLang}`);
+
+    const engine = buildEngine(opts);
+    const pair = {
+      source: opts.sourceLang || "auto",
+      target: opts.targetLang || "zh-CN",
+    };
+    const segments: Segment[] = [{ id: "s1", text }];
+
+    const result = await translateAll(engine, { pair, segments });
+    const translated = (result.segments[0]?.text ?? "").trim();
+    print(`[lumen] translateAll done, len=${translated.length}`);
+    if (!translated) return text;
+
+    const wres = openWindow({
+      source: text,
+      translation: translated,
+      engine: opts.engine ?? "google",
+      sourceLang: pair.source,
+      targetLang: pair.target,
+    });
+    print(`[lumen] openWindow ${JSON.stringify(wres)}`);
+    // DIAGNOSTIC: also stash on clipboard for easy copy/paste. Remove.
+    try {
+      pasteboard.text = "LUMEN-WIN-DIAG: " + JSON.stringify(wres);
+    } catch {
+      // ignore
+    }
+    return "";
+  } catch (err) {
+    const msg = (err as Error)?.message ?? String(err);
+    print(`[lumen] ERROR ${msg}`);
+    return "Lumen error: " + msg;
+  }
+};
+
