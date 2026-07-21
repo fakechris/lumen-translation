@@ -7,11 +7,18 @@
 // lowercase "L" (Lumen). Avoids the "A | 文" silhouette used by other
 // translation extensions.
 //
-// Coordinate system: Core Graphics native. Origin is BOTTOM-left, +y is up.
-// The tail must have smaller y than the body for it to point downward after
-// NSBitmapImageRep writes the PNG (PNG rows are top-first, but CGContext
-// pre-multiplied drawing already accounts for this — we draw in CG coords
-// and let the bitmap rep flip on export).
+// Coordinate system: CGContext is native bottom-left (+y up). PNG files
+// are stored top-down, and NSBitmapImageRep's representation(using: .png)
+// writes rows top-first. When we draw in native CG coords (bottom-left
+// origin, +y up) and export via NSBitmapImageRep, the result is that the
+// image stored in the PNG displays matching what we drew — the bitmap rep
+// handles the orientation correctly for us. So we do NOT flip the context;
+// we draw in CG native coords (+y up).
+//
+// Verified empirically: an L drawn with its baseline at small y (near the
+// bottom of the CG canvas) appears at the bottom of the PNG as displayed
+// by Preview. A tail with its tip at smaller y than the body's bottom
+// edge appears below the body.
 
 import AppKit
 import CoreGraphics
@@ -22,7 +29,6 @@ let outPath = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "icon
 let size = 128
 
 let colorSpace = CGColorSpaceCreateDeviceRGB()
-// Use .premultipliedLast so PNG export keeps the alpha channel correctly.
 guard let ctx = CGContext(
   data: nil, width: size, height: size,
   bitsPerComponent: 8, bytesPerRow: 0,
@@ -30,31 +36,26 @@ guard let ctx = CGContext(
   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
 ) else { fatalError("ctx") }
 
-// NO flip: draw in native CG coordinates. CGContext -> CGImage -> NSImage
-// -> tiff -> NSBitmapImageRep handles the Y inversion for PNG output
-// correctly when we leave the context unflipped.
-
 let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
 let black = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
 
-// Body occupies the upper portion; tail is BELOW it (smaller y).
-let bodyRect = CGRect(x: 18, y: 34, width: 92, height: 72)
+// Larger bubble to fill more of the 128x128 canvas.
+// Native CG coords: y=0 is the bottom. So body at top of canvas needs
+// a large y (e.g. 30..114). Tail hangs BELOW the body, so smaller y.
+let bodyRect = CGRect(x: 10, y: 30, width: 108, height: 84)
 let bodyPath = CGPath(
-  roundedRect: bodyRect, cornerWidth: 18, cornerHeight: 18, transform: nil)
+  roundedRect: bodyRect, cornerWidth: 20, cornerHeight: 20, transform: nil)
 
-// Fill body solid white.
 ctx.setFillColor(white)
 ctx.addPath(bodyPath)
 ctx.fillPath()
 
-// Tail: triangle attached to the bottom-left of the body, pointing DOWN.
-// Coordinates (native CG, +y up):
-//   top: y = 34 (body bottom edge)
-//   tip: y = 18 (below body)
+// Tail: attached to the BOTTOM of the body, pointing DOWN-LEFT.
+// In native CG coords, "down" means smaller y.
 let tail = CGMutablePath()
-tail.move(to: CGPoint(x: 30, y: 34))   // top-right of tail (on body edge)
-tail.addLine(to: CGPoint(x: 44, y: 34)) // top-left of tail (on body edge)
-tail.addLine(to: CGPoint(x: 22, y: 18)) // tip pointing down-left
+tail.move(to: CGPoint(x: 26, y: 30))    // on body bottom edge
+tail.addLine(to: CGPoint(x: 44, y: 30)) // other side of body bottom edge
+tail.addLine(to: CGPoint(x: 16, y: 12)) // tip pointing down-left (smaller y)
 tail.closeSubpath()
 ctx.addPath(tail)
 ctx.fillPath()
@@ -63,7 +64,7 @@ ctx.fillPath()
 ctx.setBlendMode(.destinationOut)
 
 let attrs: [NSAttributedString.Key: Any] = [
-  .font: NSFont.systemFont(ofSize: 56, weight: .heavy),
+  .font: NSFont.systemFont(ofSize: 64, weight: .heavy),
   .foregroundColor: NSColor(cgColor: black) ?? .black,
 ]
 let attr = NSAttributedString(string: "L", attributes: attrs)
