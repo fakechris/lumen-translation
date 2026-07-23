@@ -24,19 +24,34 @@ export default function App() {
   const openOptions = () => browser.runtime.openOptionsPage?.();
 
   return (
-    <div className="p-3 space-y-3 text-sm">
+    <div
+      className="p-3 space-y-3 text-sm"
+      style={{
+        background: 'var(--lumen-bg)',
+        color: 'var(--lumen-text)',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+      }}
+    >
       <header className="flex items-center justify-between">
-        <h1 className="font-bold text-base">{t("app.name")}</h1>
-        <button onClick={openOptions} className="text-blue-600 hover:underline text-xs">
-          {t("action.settings")}
+        <h1 className="font-semibold text-base" style={{ letterSpacing: '-0.02em' }}>
+          {t('app.name')}
+        </h1>
+        <button
+          onClick={openOptions}
+          className="hover:underline text-xs"
+          style={{ color: 'var(--lumen-accent-2)' }}
+        >
+          {t('action.settings')}
         </button>
       </header>
 
       <div className="space-y-2">
         <label className="block">
-          <span className="text-xs text-gray-500">{t("label.engine")}</span>
+          <span className="text-xs" style={{ color: 'var(--lumen-muted)' }}>
+            {t('label.engine')}
+          </span>
           <select
-            className="w-full mt-0.5 border rounded px-2 py-1"
+            className="w-full mt-0.5 input"
             value={settings.activeEngineId}
             onChange={(e) => {
               const activeEngineId = e.target.value;
@@ -49,7 +64,7 @@ export default function App() {
                 {ENGINE_CATALOG.filter((e) => e.group === g.id).map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.label}
-                    {e.needsKey ? ` ${t("label.requiresKey")}` : ""}
+                    {e.needsKey ? ` ${t('label.requiresKey')}` : ''}
                   </option>
                 ))}
               </optgroup>
@@ -59,9 +74,11 @@ export default function App() {
 
         <div className="flex gap-2">
           <label className="flex-1">
-            <span className="text-xs text-gray-500">{t("label.target")}</span>
+            <span className="text-xs" style={{ color: 'var(--lumen-muted)' }}>
+              {t('label.target')}
+            </span>
             <input
-              className="w-full mt-0.5 border rounded px-2 py-1"
+              className="w-full mt-0.5 input"
               value={settings.targetLang}
               onChange={(e) => {
                 const targetLang = e.target.value;
@@ -71,9 +88,11 @@ export default function App() {
             />
           </label>
           <label className="flex-1">
-            <span className="text-xs text-gray-500">{t("label.source")}</span>
+            <span className="text-xs" style={{ color: 'var(--lumen-muted)' }}>
+              {t('label.source')}
+            </span>
             <input
-              className="w-full mt-0.5 border rounded px-2 py-1"
+              className="w-full mt-0.5 input"
               value={settings.sourceLang}
               onChange={(e) => {
                 const sourceLang = e.target.value;
@@ -94,35 +113,39 @@ export default function App() {
               broadcast({ ...settings, bilingual });
             }}
           />
-          <span>{t("label.bilingual")}</span>
+          <span>{t('label.bilingual')}</span>
         </label>
       </div>
 
       <div className="grid grid-cols-3 gap-2 pt-1">
         <button
-          className="bg-blue-600 text-white rounded py-1.5 hover:bg-blue-700"
-          onClick={() => send("toggle-translate")}
+          className="lumen-btn-primary py-1.5"
+          onClick={() => send('toggle-translate')}
         >
-          {t("action.translate")}
+          {t('action.translate')}
         </button>
         <button
-          className="border rounded py-1.5 hover:bg-gray-50"
-          onClick={() => send("translate-selection")}
+          className="lumen-btn-secondary py-1.5"
+          onClick={() => send('translate-selection')}
         >
-          {t("action.selection")}
+          {t('action.selection')}
         </button>
         <button
-          className="border rounded py-1.5 hover:bg-gray-50"
-          onClick={() => send("translate-input")}
+          className="lumen-btn-secondary py-1.5"
+          onClick={() => send('translate-input')}
         >
-          {t("action.input")}
+          {t('action.input')}
         </button>
       </div>
 
-      <p className="text-[11px] text-gray-400 leading-snug">{t("popup.shortcuts")}</p>
+      <p className="text-[11px] leading-snug" style={{ color: 'var(--lumen-muted)' }}>
+        {t('popup.shortcuts')}
+      </p>
 
-      <div className="pt-2 border-t">
-        <div className="text-xs text-gray-500 mt-2 mb-1">Tools</div>
+      <div className="pt-2" style={{ borderTop: '1px solid var(--lumen-border)' }}>
+        <div className="text-xs mt-2 mb-1" style={{ color: 'var(--lumen-muted)' }}>
+          Tools
+        </div>
         <div className="grid grid-cols-3 gap-2">
           <ToolLink label="File" path="/file-translator.html" />
           <ToolLink label="PDF" path="/pdf-reader.html" />
@@ -140,7 +163,7 @@ function ToolLink({ label, path }: { label: string; path: string }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="border rounded py-1.5 text-center text-xs hover:bg-gray-50"
+      className="lumen-btn-secondary py-1.5 text-center text-xs"
     >
       {label}
     </a>

@@ -41,13 +41,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // we expose Preferences + Quit via NSStatusItem.
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     if let btn = statusItem.button {
-      btn.image = NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Lumen")
+      let icon = NSImage(contentsOfFile: Bundle.main.path(forResource: "statusicon", ofType: "png") ?? "")
+      if let icon {
+        icon.size = NSSize(width: 18, height: 18)
+        icon.isTemplate = true
+        btn.image = icon
+      } else {
+        btn.image = NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Lumen")
+      }
     }
     let menu = NSMenu()
-    menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+    let prefsItem = menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+    prefsItem.target = self
     menu.addItem(NSMenuItem.separator())
-    menu.addItem(withTitle: "Quit LumenWindow", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    menu.items.forEach { $0.target = self }
+    let quitItem = menu.addItem(withTitle: "Quit Lumen Translation", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    quitItem.target = NSApplication.shared
     statusItem.menu = menu
   }
 
@@ -56,7 +64,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    return .terminateCancel
+    ProcessInfo.processInfo.enableSuddenTermination()
+    ProcessInfo.processInfo.enableAutomaticTermination("lumen-popclip-window")
+    return .terminateNow
   }
 }
 
@@ -352,11 +362,12 @@ final class TranslateContentView: NSView {
 
   private func setup() {
     wantsLayer = true
-    layer?.cornerRadius = 12
+    layer?.cornerRadius = 16
     layer?.masksToBounds = true
-    layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-    layer?.borderWidth = 0.5
-    layer?.borderColor = NSColor.separatorColor.cgColor
+    // Lumen Design System "Atelier" warm parchment surface.
+    layer?.backgroundColor = NSColor(srgbRed: 0xff/255, green: 0xfd/255, blue: 0xfa/255, alpha: 1).cgColor
+    layer?.borderWidth = 1.0
+    layer?.borderColor = NSColor(srgbRed: 0xe7/255, green: 0xe1/255, blue: 0xd8/255, alpha: 1).cgColor
 
     sourceScrollView.documentView = sourceTextView
     sourceScrollView.hasVerticalScroller = true
@@ -376,19 +387,20 @@ final class TranslateContentView: NSView {
     translationScrollView.borderType = .noBorder
     translationScrollView.translatesAutoresizingMaskIntoConstraints = false
 
-    sourceTextView.font = .systemFont(ofSize: 14)
-    sourceTextView.textColor = .labelColor
-    translationTextView.font = .systemFont(ofSize: 14)
-    translationTextView.textColor = .labelColor
+    sourceTextView.font = .systemFont(ofSize: 14, weight: .regular)
+    sourceTextView.textColor = NSColor(srgbRed: 0x44/255, green: 0x3a/255, blue: 0x32/255, alpha: 1)
+    translationTextView.font = .systemFont(ofSize: 14, weight: .regular)
+    translationTextView.textColor = NSColor(srgbRed: 0x1f/255, green: 0x1a/255, blue: 0x17/255, alpha: 1)
 
     engineLabel.font = .systemFont(ofSize: 11, weight: .medium)
-    engineLabel.textColor = .tertiaryLabelColor
+    engineLabel.textColor = NSColor(srgbRed: 0x71/255, green: 0x67/255, blue: 0x5d/255, alpha: 1)
     engineLabel.translatesAutoresizingMaskIntoConstraints = false
 
     closeButton.bezelStyle = .inline
     closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close")
     closeButton.imagePosition = .imageOnly
     closeButton.font = .systemFont(ofSize: 14)
+    closeButton.contentTintColor = NSColor(srgbRed: 0x71/255, green: 0x67/255, blue: 0x5d/255, alpha: 1)
     closeButton.target = self
     closeButton.action = #selector(closeAction)
     closeButton.translatesAutoresizingMaskIntoConstraints = false

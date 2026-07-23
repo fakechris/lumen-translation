@@ -58,15 +58,28 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-5">
+    <div
+      className="max-w-4xl mx-auto p-6 space-y-5"
+      style={{
+        background: 'var(--lumen-bg)',
+        color: 'var(--lumen-text)',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        minHeight: '100vh',
+      }}
+    >
       <header>
-        <h1 className="text-2xl font-bold">{t("app.name")} · PDF Translator</h1>
-        <p className="text-sm text-gray-500">
+        <h1 className="text-2xl font-semibold" style={{ letterSpacing: '-0.02em' }}>
+          {t('app.name')} · PDF Translator
+        </h1>
+        <p className="text-sm" style={{ color: 'var(--lumen-muted)' }}>
           Reflow bilingual PDF — original text + translation per paragraph. Runs locally via pdf.js.
         </p>
       </header>
 
-      <label className="block border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-gray-400">
+      <label
+        className="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer"
+        style={{ borderRadius: 16, borderColor: 'var(--lumen-border-strong)' }}
+      >
         <input
           type="file"
           accept="application/pdf,.pdf"
@@ -79,42 +92,60 @@ export default function App() {
         {fileRef.current ? (
           <div>
             <div className="font-medium">{fileRef.current.name}</div>
-            <div className="text-xs text-gray-500 mt-1">click to choose another PDF</div>
+            <div className="text-xs mt-1" style={{ color: 'var(--lumen-muted)' }}>
+              click to choose another PDF
+            </div>
           </div>
         ) : (
-          <div className="text-gray-500">Drop or click to choose a PDF</div>
+          <div style={{ color: 'var(--lumen-muted)' }}>Drop or click to choose a PDF</div>
         )}
       </label>
 
       {fileRef.current && (
         <button
-          className="bg-blue-600 text-white rounded px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="lumen-btn-primary px-4 py-2 text-sm disabled:opacity-50"
           onClick={run}
           disabled={busy}
         >
-          {busy ? "Translating…" : "Translate PDF"}
+          {busy ? 'Translating…' : 'Translate PDF'}
         </button>
       )}
 
       {progress && progress.total > 0 && (
-        <div className="text-xs text-gray-500">
+        <div className="text-xs" style={{ color: 'var(--lumen-muted)' }}>
           {progress.done}/{progress.total} pages
         </div>
       )}
-      {pageCount > 0 && !busy && <div className="text-xs text-gray-500">{pageCount} pages loaded</div>}
+      {pageCount > 0 && !busy && (
+        <div className="text-xs" style={{ color: 'var(--lumen-muted)' }}>
+          {pageCount} pages loaded
+        </div>
+      )}
 
-      {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">{error}</div>}
+      {error && (
+        <div
+          className="border rounded p-3 text-sm"
+          style={{
+            background: 'var(--lumen-danger-soft)',
+            color: 'var(--lumen-danger)',
+            borderColor: 'var(--lumen-danger)',
+            borderRadius: 10,
+          }}
+        >
+          {error}
+        </div>
+      )}
 
       <div
         ref={containerRef}
-        className="bg-white rounded-lg shadow-sm p-6 max-h-[75vh] overflow-auto prose prose-sm max-w-none"
+        className="lumen-card p-6 max-h-[75vh] overflow-auto prose prose-sm max-w-none"
       />
 
       <style>{`
-        .lumen-pdf-page { margin-bottom: 2em; padding-bottom: 1em; border-bottom: 1px solid #e5e7eb; }
-        .lumen-pdf-translation { margin: .25em 0 .5em; padding: .25em .5em; border-left: 3px solid #2563eb; background: rgba(37,99,235,.05); color: #111; }
-        .lumen-pdf-translation[data-lumen-style="green"] { border-left-color: #16a34a; background: rgba(22,163,74,.06); }
-        .lumen-pdf-translation[data-lumen-style="plain"] { border-left: none; background: transparent; border-top: 1px dashed #d1d5db; }
+        .lumen-pdf-page { margin-bottom: 2em; padding-bottom: 1em; border-bottom: 1px solid #e7e1d8; }
+        .lumen-pdf-translation { margin: .25em 0 .5em; padding: .25em .5em; border-left: 3px solid #9f4f24; background: #f4dfd2; color: #1f1a17; }
+        .lumen-pdf-translation[data-lumen-style="green"] { border-left-color: #2f7d52; background: rgba(47, 125, 82, 0.10); }
+        .lumen-pdf-translation[data-lumen-style="plain"] { border-left: none; background: transparent; border-top: 1px dashed #cdc4b6; }
         .lumen-pdf-translation[data-lumen-style="minimal"] { border-left: none; background: transparent; padding: 0; }
       `}</style>
     </div>

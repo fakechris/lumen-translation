@@ -53,15 +53,28 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-5">
+    <div
+      className="max-w-3xl mx-auto p-6 space-y-5"
+      style={{
+        background: 'var(--lumen-bg)',
+        color: 'var(--lumen-text)',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        minHeight: '100vh',
+      }}
+    >
       <header>
-        <h1 className="text-2xl font-bold">{t("app.name")} · Image Translator</h1>
-        <p className="text-sm text-gray-500">
+        <h1 className="text-2xl font-semibold" style={{ letterSpacing: '-0.02em' }}>
+          {t('app.name')} · Image Translator
+        </h1>
+        <p className="text-sm" style={{ color: 'var(--lumen-muted)' }}>
           OCR + translation, runs locally via Tesseract.js. No image leaves your device.
         </p>
       </header>
 
-      <label className="block border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-gray-400">
+      <label
+        className="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer"
+        style={{ borderRadius: 16, borderColor: 'var(--lumen-border-strong)' }}
+      >
         <input
           type="file"
           accept="image/*"
@@ -72,36 +85,58 @@ export default function App() {
           }}
         />
         {imgUrl ? (
-          <img src={imgUrl} alt="source" className="max-h-60 mx-auto rounded shadow" />
+          <img src={imgUrl} alt="source" className="max-h-60 mx-auto rounded" />
         ) : (
-          <div className="text-gray-500">Click to choose an image (PNG / JPG / WebP)</div>
+          <div style={{ color: 'var(--lumen-muted)' }}>Click to choose an image (PNG / JPG / WebP)</div>
         )}
       </label>
 
       {imgUrl && (
         <button
-          className="bg-blue-600 text-white rounded px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="lumen-btn-primary px-4 py-2 text-sm disabled:opacity-50"
           onClick={run}
           disabled={busy}
         >
-          {busy ? (progress ?? "Working…") : "OCR + Translate"}
+          {busy ? (progress ?? 'Working…') : 'OCR + Translate'}
         </button>
       )}
 
-      {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">{error}</div>}
+      {error && (
+        <div
+          className="border rounded p-3 text-sm"
+          style={{
+            background: 'var(--lumen-danger-soft)',
+            color: 'var(--lumen-danger)',
+            borderColor: 'var(--lumen-danger)',
+            borderRadius: 10,
+          }}
+        >
+          {error}
+        </div>
+      )}
 
       {result && (
-        <div className="bg-white rounded-lg shadow-sm p-5 space-y-3">
+        <div className="lumen-card p-5 space-y-3">
           <div>
-            <div className="text-xs text-gray-500 mb-1">OCR text</div>
+            <div className="text-xs mb-1" style={{ color: 'var(--lumen-muted)' }}>
+              OCR text
+            </div>
             <pre className="text-sm whitespace-pre-wrap font-sans">{result.original}</pre>
           </div>
           <div>
-            <div className="text-xs text-gray-500 mb-1">Translation</div>
-            <p className="text-sm border-l-3 border-blue-600 pl-3">{result.translated}</p>
+            <div className="text-xs mb-1" style={{ color: 'var(--lumen-muted)' }}>
+              Translation
+            </div>
+            <p
+              className="text-sm pl-3"
+              style={{ borderLeft: '3px solid var(--lumen-accent)' }}
+            >
+              {result.translated}
+            </p>
           </div>
           <button
-            className="text-xs text-blue-600 hover:underline"
+            className="text-xs hover:underline"
+            style={{ color: 'var(--lumen-accent-2)' }}
             onClick={() => navigator.clipboard.writeText(result.translated)}
           >
             copy translation

@@ -1,9 +1,134 @@
 @import "tailwindcss";
 
-/* Shared form control used by popup/options. */
+/* ──────────────────────────────────────────────────────────────
+ * Lumen Design System tokens (Atelier light / Vault dark).
+ * Applied to all extension UI surfaces: popup, options, file/image/pdf tools.
+ * ────────────────────────────────────────────────────────────── */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* backgrounds */
+  --lumen-bg: #f7f6f2;
+  --lumen-bg-deep: #efece5;
+  --lumen-surface: #fffdfa;
+  --lumen-surface-2: #fbf7f0;
+
+  /* borders */
+  --lumen-border: #e7e1d8;
+  --lumen-border-strong: #cdc4b6;
+
+  /* text */
+  --lumen-text: #1f1a17;
+  --lumen-text-soft: #443a32;
+  --lumen-muted: #71675d;
+
+  /* accents */
+  --lumen-accent: #9f4f24;
+  --lumen-accent-soft: #f4dfd2;
+  --lumen-accent-strong: #843c15;
+  --lumen-accent-2: #2563bb;
+  --lumen-accent-2-soft: #dbe7f7;
+  --lumen-on-accent: #fffdfa;
+
+  /* semantic */
+  --lumen-success: #2f7d52;
+  --lumen-warn: #a85e10;
+  --lumen-danger: #b04545;
+  --lumen-danger-soft: #fbe9e7;
+
+  /* shadows */
+  --lumen-shadow: 0 12px 36px rgba(31, 26, 23, 0.06);
+  --lumen-shadow-pop: 0 16px 48px rgba(31, 26, 23, 0.12);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --lumen-bg: #0a0e16;
+  --lumen-bg-deep: #05080d;
+  --lumen-surface: #11161f;
+  --lumen-surface-2: #161c27;
+
+  --lumen-border: #1f2937;
+  --lumen-border-strong: #2c3a4f;
+
+  --lumen-text: #e6edf5;
+  --lumen-text-soft: #c2cfde;
+  --lumen-muted: #7d8aa0;
+
+  --lumen-accent: #3b82f6;
+  --lumen-accent-soft: rgba(59, 130, 246, 0.16);
+  --lumen-accent-strong: #5b98f8;
+  --lumen-accent-2: #06b6d4;
+  --lumen-accent-2-soft: rgba(6, 182, 212, 0.16);
+  --lumen-on-accent: #081120;
+
+  --lumen-success: #22c55e;
+  --lumen-warn: #fbbf24;
+  --lumen-danger: #f472b6;
+  --lumen-danger-soft: rgba(244, 114, 182, 0.14);
+
+  --lumen-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+  --lumen-shadow-pop: 0 18px 52px rgba(0, 0, 0, 0.7);
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Shared form controls and primitives.
+ * ────────────────────────────────────────────────────────────── */
 @layer components {
   .input {
-    @apply w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200;
+    width: 100%;
+    border: 1px solid var(--lumen-border-strong);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 0.92rem;
+    background: var(--lumen-surface);
+    color: var(--lumen-text);
+    transition: border-color 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .input:focus {
+    outline: 3px solid color-mix(in srgb, var(--lumen-accent) 32%, transparent);
+    outline-offset: 2px;
+    border-color: var(--lumen-accent);
+  }
+
+  .lumen-btn-primary {
+    background: var(--lumen-accent);
+    color: var(--lumen-on-accent);
+    border-radius: 10px;
+    font-weight: 500;
+    transition: background 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .lumen-btn-primary:hover {
+    background: var(--lumen-accent-strong);
+  }
+
+  .lumen-btn-secondary {
+    background: transparent;
+    border: 1px solid var(--lumen-border-strong);
+    color: var(--lumen-text);
+    border-radius: 10px;
+    transition: background 120ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .lumen-btn-secondary:hover {
+    background: var(--lumen-surface-2);
+  }
+
+  .lumen-card {
+    background: var(--lumen-surface);
+    border: 1px solid var(--lumen-border);
+    border-radius: 16px;
+  }
+
+  .lumen-section-title {
+    font-weight: 600;
+    font-size: 1.15rem;
+    letter-spacing: -0.02em;
+    color: var(--lumen-text);
   }
 }
 
@@ -11,40 +136,41 @@
  * Content-script styles for bilingual rendering.
  * Injected into pages via the content script; scoped under the
  * `lumen-translation` custom element and our floating ball.
+ * Uses Lumen Design System "Atelier" palette.
  * ============================================================ */
 
 lumen-translation {
   display: block;
   margin-top: 6px;
-  padding: 4px 8px;
-  border-left: 3px solid #2563eb;
-  background: rgba(37, 99, 235, 0.05);
+  padding: 4px 12px;
+  border-left: 3px solid var(--lumen-accent, #9f4f24);
+  background: var(--lumen-accent-soft, #f4dfd2);
   border-radius: 4px;
   font-size: inherit;
   line-height: inherit;
   color: inherit;
   font-family: inherit;
-  transition: background 0.2s ease;
+  transition: background 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 lumen-translation:hover {
-  background: rgba(37, 99, 235, 0.1);
+  background: color-mix(in srgb, var(--lumen-accent, #9f4f24) 18%, transparent);
 }
 
 /* Style variants — picked via data-lumen-style */
 lumen-translation[data-lumen-style="green"] {
-  border-left-color: #16a34a;
-  background: rgba(22, 163, 74, 0.06);
+  border-left-color: var(--lumen-success, #2f7d52);
+  background: color-mix(in srgb, var(--lumen-success, #2f7d52) 10%, transparent);
 }
 lumen-translation[data-lumen-style="green"]:hover {
-  background: rgba(22, 163, 74, 0.12);
+  background: color-mix(in srgb, var(--lumen-success, #2f7d52) 18%, transparent);
 }
 
 lumen-translation[data-lumen-style="plain"] {
   border-left: none;
   background: transparent;
   padding: 2px 0;
-  border-top: 1px dashed #d1d5db;
+  border-top: 1px dashed var(--lumen-border-strong, #cdc4b6);
   margin-top: 4px;
 }
 
@@ -68,8 +194,8 @@ lumen-translation[data-lumen-hidden-original] {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #2563eb, #1e40af);
-  color: #fff;
+  background: var(--lumen-accent, #9f4f24);
+  color: var(--lumen-on-accent, #fffdfa);
   font-size: 20px;
   font-weight: 700;
   font-family: system-ui, sans-serif;
@@ -77,19 +203,19 @@ lumen-translation[data-lumen-hidden-original] {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--lumen-shadow-pop, 0 16px 48px rgba(31, 26, 23, 0.12));
   z-index: 2147483646;
   user-select: none;
-  transition: transform 0.15s ease;
+  transition: opacity 120ms cubic-bezier(0.4, 0, 0.2, 1);
   border: none;
 }
 
 .lumen-fab:hover {
-  transform: scale(1.08);
+  opacity: 0.88;
 }
 
 .lumen-fab[data-active="true"] {
-  background: linear-gradient(135deg, #16a34a, #15803d);
+  background: var(--lumen-success, #2f7d52);
 }
 
 /* Selection translation popup */
@@ -98,13 +224,13 @@ lumen-translation[data-lumen-hidden-original] {
   z-index: 2147483647;
   max-width: 360px;
   min-width: 180px;
-  padding: 10px 12px;
-  background: #fff;
-  color: #111;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  font: 14px/1.5 system-ui, -apple-system, sans-serif;
+  padding: 12px 14px;
+  background: var(--lumen-surface, #fffdfa);
+  color: var(--lumen-text, #1f1a17);
+  border: 1px solid var(--lumen-border, #e7e1d8);
+  border-radius: 12px;
+  box-shadow: var(--lumen-shadow-pop, 0 16px 48px rgba(31, 26, 23, 0.12));
+  font: 14px/1.55 system-ui, -apple-system, sans-serif;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -114,7 +240,7 @@ lumen-translation[data-lumen-hidden-original] {
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
-  color: #6b7280;
+  color: var(--lumen-muted, #71675d);
   margin-bottom: 4px;
 }
 
@@ -122,22 +248,23 @@ lumen-translation[data-lumen-hidden-original] {
   cursor: pointer;
   border: none;
   background: transparent;
-  color: #9ca3af;
+  color: var(--lumen-muted, #71675d);
   font-size: 14px;
+  transition: color 120ms;
 }
 
 .lumen-sel-popup__close:hover {
-  color: #111;
+  color: var(--lumen-text, #1f1a17);
 }
 
 .lumen-sel-popup__body {
-  color: #111;
+  color: var(--lumen-text, #1f1a17);
 }
 
 .lumen-sel-popup__copy {
   margin-top: 6px;
   font-size: 11px;
-  color: #2563eb;
+  color: var(--lumen-accent-2, #2563bb);
   cursor: pointer;
   background: none;
   border: none;

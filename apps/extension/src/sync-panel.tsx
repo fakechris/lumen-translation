@@ -130,14 +130,26 @@ export function SyncPanel({
 
       {cfg.backend !== "off" && (
         <button
-          className="bg-blue-600 text-white rounded px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-50"
+          className="lumen-btn-primary px-4 py-2 text-sm disabled:opacity-50"
           onClick={() => void doSync()}
           disabled={busy}
         >
-          {busy ? "…" : "Sync now"}
+          {busy ? '…' : 'Sync now'}
         </button>
       )}
-      {status && <div className="text-xs text-gray-600 bg-gray-50 border rounded p-2">{status}</div>}
+      {status && (
+        <div
+          className="text-xs border rounded p-2"
+          style={{
+            color: 'var(--lumen-text-soft)',
+            background: 'var(--lumen-surface-2)',
+            borderColor: 'var(--lumen-border)',
+            borderRadius: 10,
+          }}
+        >
+          {status}
+        </div>
+      )}
     </div>
   );
 }
@@ -147,7 +159,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <label className="block">
       <div className="text-sm font-medium">{label}</div>
       {children}
-      {hint && <div className="text-xs text-gray-500 mt-0.5">{hint}</div>}
+      {hint && (
+        <div className="text-xs mt-0.5" style={{ color: 'var(--lumen-muted)' }}>
+          {hint}
+        </div>
+      )}
     </label>
   );
 }
