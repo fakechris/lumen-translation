@@ -83,47 +83,73 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-5">
+    <div
+      className="max-w-4xl mx-auto p-6 space-y-5"
+      style={{
+        background: 'var(--lumen-bg)',
+        color: 'var(--lumen-text)',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        minHeight: '100vh',
+      }}
+    >
       <header>
-        <h1 className="text-2xl font-bold">{t("app.name")} · File Translator</h1>
-        <p className="text-sm text-gray-500">TXT · Markdown · HTML · ePub — bilingual output, fully local.</p>
+        <h1 className="text-2xl font-semibold" style={{ letterSpacing: '-0.02em' }}>
+          {t('app.name')} · File Translator
+        </h1>
+        <p className="text-sm" style={{ color: 'var(--lumen-muted)' }}>
+          TXT · Markdown · HTML · ePub — bilingual output, fully local.
+        </p>
       </header>
 
       <DropZone onFile={handleFile} filename={filename} />
 
-      {error && <div className="bg-red-50 text-red-700 border border-red-200 rounded p-3 text-sm">{error}</div>}
+      {error && (
+        <div
+          className="border rounded p-3 text-sm"
+          style={{
+            background: 'var(--lumen-danger-soft)',
+            color: 'var(--lumen-danger)',
+            borderColor: 'var(--lumen-danger)',
+            borderRadius: 10,
+          }}
+        >
+          {error}
+        </div>
+      )}
 
       {blocks.length > 0 && (
         <div className="flex flex-wrap gap-2 items-center">
           <button
-            className="bg-blue-600 text-white rounded px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-50"
+            className="lumen-btn-primary px-4 py-2 text-sm disabled:opacity-50"
             onClick={translate}
             disabled={busy}
           >
-            {busy ? "Translating…" : `Translate ${blocks.length} blocks`}
+            {busy ? 'Translating…' : `Translate ${blocks.length} blocks`}
           </button>
           {progress && (
-            <span className="text-xs text-gray-500">
+            <span className="text-xs" style={{ color: 'var(--lumen-muted)' }}>
               {progress.done}/{progress.total}
             </span>
           )}
           <div className="flex-1" />
-          <button className="border rounded px-3 py-1.5 text-sm hover:bg-gray-50" onClick={() => download("txt")} disabled={busy}>
+          <button className="lumen-btn-secondary px-3 py-1.5 text-sm" onClick={() => download('txt')} disabled={busy}>
             ↓ TXT
           </button>
-          <button className="border rounded px-3 py-1.5 text-sm hover:bg-gray-50" onClick={() => download("md")} disabled={busy}>
+          <button className="lumen-btn-secondary px-3 py-1.5 text-sm" onClick={() => download('md')} disabled={busy}>
             ↓ MD
           </button>
-          <button className="border rounded px-3 py-1.5 text-sm hover:bg-gray-50" onClick={() => download("html")} disabled={busy}>
+          <button className="lumen-btn-secondary px-3 py-1.5 text-sm" onClick={() => download('html')} disabled={busy}>
             ↓ HTML
           </button>
         </div>
       )}
 
       {blocks.length > 0 && (
-        <div className="bg-white rounded-lg shadow-sm p-5 space-y-3 max-h-[70vh] overflow-auto">
+        <div
+          className="lumen-card p-5 space-y-3 max-h-[70vh] overflow-auto"
+        >
           {blocks.map((b) => (
-            <div key={b.id} className="border-b last:border-b-0 pb-3">
+            <div key={b.id} className="pb-3" style={{ borderBottom: '1px solid var(--lumen-border)' }}>
               <div
                 className="prose prose-sm max-w-none"
                 // Safe: every block's `html` is sanitized at parse time.
@@ -134,7 +160,15 @@ export default function App() {
                 dangerouslySetInnerHTML={{ __html: b.html }}
               />
               {b.translated !== undefined && (
-                <p className="mt-2 border-l-3 border-blue-600 pl-3 text-gray-800">{b.translated}</p>
+                <p
+                  className="mt-2 pl-3"
+                  style={{
+                    borderLeft: '3px solid var(--lumen-accent)',
+                    color: 'var(--lumen-text-soft)',
+                  }}
+                >
+                  {b.translated}
+                </p>
               )}
             </div>
           ))}
@@ -148,9 +182,12 @@ function DropZone({ onFile, filename }: { onFile: (f: File) => void; filename: s
   const [drag, setDrag] = useState(false);
   return (
     <label
-      className={`block border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition ${
-        drag ? "border-blue-600 bg-blue-50" : "border-gray-300 hover:border-gray-400"
-      }`}
+      className="block border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition"
+      style={{
+        borderRadius: 16,
+        borderColor: drag ? 'var(--lumen-accent)' : 'var(--lumen-border-strong)',
+        background: drag ? 'var(--lumen-accent-soft)' : 'transparent',
+      }}
       onDragOver={(e) => {
         e.preventDefault();
         setDrag(true);
@@ -175,12 +212,16 @@ function DropZone({ onFile, filename }: { onFile: (f: File) => void; filename: s
       {filename ? (
         <div>
           <div className="font-medium">{filename}</div>
-          <div className="text-xs text-gray-500 mt-1">click or drop another file to replace</div>
+          <div className="text-xs mt-1" style={{ color: 'var(--lumen-muted)' }}>
+            click or drop another file to replace
+          </div>
         </div>
       ) : (
         <div>
           <div className="font-medium">Drop a file here or click to choose</div>
-          <div className="text-xs text-gray-500 mt-1">TXT · MD · HTML · ePub</div>
+          <div className="text-xs mt-1" style={{ color: 'var(--lumen-muted)' }}>
+            TXT · MD · HTML · ePub
+          </div>
         </div>
       )}
     </label>
@@ -315,8 +356,8 @@ function serialize(blocks: Block[], kind: "txt" | "md" | "html", bilingual: bool
     )
     .join("\n");
   return `<!doctype html><html><head><meta charset="utf-8"><style>
-.lumen-block{margin:0 0 1em;padding:0 0 1em;border-bottom:1px solid #eee}
-.lumen-translation{margin-top:.5em;padding:.25em .5em;border-left:3px solid #2563eb;background:rgba(37,99,235,.05);color:#111}
+.lumen-block{margin:0 0 1em;padding:0 0 1em;border-bottom:1px solid #e7e1d8}
+.lumen-translation{margin-top:.5em;padding:.25em .5em;border-left:3px solid #9f4f24;background:#f4dfd2;color:#1f1a17}
 </style></head><body>${body}</body></html>`;
 }
 

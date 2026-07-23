@@ -32,31 +32,45 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-6 space-y-8">
+    <div
+      className="max-w-3xl mx-auto p-6 space-y-8"
+      style={{
+        background: 'var(--lumen-bg)',
+        color: 'var(--lumen-text)',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        minHeight: '100vh',
+      }}
+    >
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{t("app.name")}</h1>
-          <p className="text-sm text-gray-500">{t("app.tagline")}</p>
+          <h1 className="text-2xl font-semibold" style={{ letterSpacing: '-0.02em' }}>
+            {t('app.name')}
+          </h1>
+          <p className="text-sm" style={{ color: 'var(--lumen-muted)' }}>
+            {t('app.tagline')}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <select
-            className="text-xs border rounded px-2 py-1"
-            value={t("app.name") === "Lumen 翻译" ? "zh" : "en"}
+            className="text-xs input"
+            style={{ width: 'auto' }}
+            value={t('app.name') === 'Lumen 翻译' ? 'zh' : 'en'}
             onChange={(e) => switchLang(e.target.value as Lang)}
           >
             <option value="en">English</option>
             <option value="zh">中文</option>
           </select>
           <button
-            className="text-xs text-gray-500 hover:underline"
+            className="text-xs hover:underline"
+            style={{ color: 'var(--lumen-muted)' }}
             onClick={() => {
-              if (confirm(t("reset.confirm"))) {
+              if (confirm(t('reset.confirm'))) {
                 reset();
                 broadcast({ ...useSettings.getState() });
               }
             }}
           >
-            {t("reset.action")}
+            {t('reset.action')}
           </button>
         </div>
       </header>
@@ -162,7 +176,7 @@ export default function App() {
 
       {/* Rule subscriptions */}
       <Section title={t("section.subscriptions")}>
-        <p className="text-xs text-gray-500 mb-2">{t("subscriptions.hint")}</p>
+        <p className="text-xs mb-2" style={{ color: 'var(--lumen-muted)' }}>{t("subscriptions.hint")}</p>
         <SubscriptionManager
           urls={settings.subscribedRuleUrls}
           onUrlsChange={(subscribedRuleUrls) => update({ subscribedRuleUrls })}
@@ -177,12 +191,12 @@ export default function App() {
 
       {/* Shortcuts */}
       <Section title={t("section.shortcuts")}>
-        <p className="text-xs text-gray-500 mb-2">{t("shortcuts.hint")}</p>
+        <p className="text-xs mb-2" style={{ color: 'var(--lumen-muted)' }}>{t("shortcuts.hint")}</p>
         <ul className="text-sm space-y-1">
           {Object.entries(settings.shortcuts).map(([k, v]) => (
             <li key={k} className="flex justify-between">
               <span>{k}</span>
-              <code className="text-gray-600">{v}</code>
+              <code style={{ color: 'var(--lumen-text-soft)' }}>{v}</code>
             </li>
           ))}
         </ul>
@@ -190,7 +204,7 @@ export default function App() {
 
       {/* Sync */}
       <Section title={t("section.sync")}>
-        <p className="text-xs text-gray-500 mb-2">{t("sync.hint")}</p>
+        <p className="text-xs mb-2" style={{ color: 'var(--lumen-muted)' }}>{t("sync.hint")}</p>
         <SyncPanel
           settings={settings}
           onSyncConfigChange={(cfg) => {
@@ -201,15 +215,15 @@ export default function App() {
         />
       </Section>
 
-      <footer className="text-xs text-gray-400 pt-4 border-t">{t("footer")}</footer>
+      <footer className="text-xs pt-4" style={{ color: 'var(--lumen-muted)', borderTop: '1px solid var(--lumen-border)' }}>{t("footer")}</footer>
     </div>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="bg-white rounded-lg shadow-sm p-5 space-y-3">
-      <h2 className="font-semibold text-lg">{title}</h2>
+    <section className="lumen-card p-5 space-y-3">
+      <h2 className="lumen-section-title">{title}</h2>
       {children}
     </section>
   );
@@ -228,7 +242,11 @@ function Field({
     <label className="block">
       <div className="text-sm font-medium">{label}</div>
       {children}
-      {hint && <div className="text-xs text-gray-500 mt-0.5">{hint}</div>}
+      {hint && (
+        <div className="text-xs mt-0.5" style={{ color: 'var(--lumen-muted)' }}>
+          {hint}
+        </div>
+      )}
     </label>
   );
 }
@@ -261,14 +279,19 @@ function GlossaryEditor({
             onChange={(ev) => update(i, { target: ev.target.value })}
           />
           <button
-            className="text-red-500 px-2"
+            className="px-2 hover:underline"
+            style={{ color: 'var(--lumen-danger)' }}
             onClick={() => onChange(entries.filter((_, idx) => idx !== i))}
           >
             ×
           </button>
         </div>
       ))}
-      <button className="text-sm text-blue-600" onClick={() => onChange([...entries, { source: "", target: "" }])}>
+      <button
+        className="text-sm hover:underline"
+        style={{ color: 'var(--lumen-accent-2)' }}
+        onClick={() => onChange([...entries, { source: '', target: '' }])}
+      >
         {t("glossary.add")}
       </button>
     </div>
@@ -289,7 +312,7 @@ function RulesEditor({
   return (
     <div className="space-y-3">
       {entries.map((r, i) => (
-        <div key={i} className="border rounded p-3 space-y-2">
+        <div key={i} className="border rounded p-3 space-y-2" style={{ borderColor: 'var(--lumen-border)', borderRadius: 12 }}>
           <input
             className="input"
             placeholder={t("rules.match")}
@@ -318,7 +341,8 @@ function RulesEditor({
             />
           </div>
           <button
-            className="text-red-500 text-sm"
+            className="text-sm hover:underline"
+            style={{ color: 'var(--lumen-danger)' }}
             onClick={() => onChange(entries.filter((_, idx) => idx !== i))}
           >
             {t("rules.remove")}
@@ -326,7 +350,8 @@ function RulesEditor({
         </div>
       ))}
       <button
-        className="text-sm text-blue-600"
+        className="text-sm hover:underline"
+        style={{ color: 'var(--lumen-accent-2)' }}
         onClick={() => onChange([...entries, { match: "", bilingual: true }])}
       >
         {t("rules.add")}
@@ -439,9 +464,15 @@ function ProviderFields({
       )}
 
       {entry.docs && (
-        <div className="text-xs text-gray-500">
-          <a href={entry.docs} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
-            {t("label.docs")} ↗
+        <div className="text-xs" style={{ color: 'var(--lumen-muted)' }}>
+          <a
+            href={entry.docs}
+            target="_blank"
+            rel="noreferrer"
+            className="hover:underline"
+            style={{ color: 'var(--lumen-accent-2)' }}
+          >
+            {t('label.docs')} ↗
           </a>
         </div>
       )}

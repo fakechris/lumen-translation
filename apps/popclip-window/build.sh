@@ -31,6 +31,9 @@ swiftc \
 # Copy the scripting definition (AppleScript `translate` keyword).
 cp "${APP_NAME}/${APP_NAME}.sdef" "${RESOURCES_DIR}/${APP_NAME}.sdef"
 
+# Copy the menu bar template icon.
+cp "${APP_NAME}/statusicon.png" "${RESOURCES_DIR}/statusicon.png"
+
 # Info.plist — mirrors /Applications/Bob.app exactly:
 #   - LSUIElement=true (no Dock icon, but still a regular NSApplication)
 #   - NSAppleScriptEnabled=true
@@ -43,7 +46,7 @@ cat > "${CONTENTS}/Info.plist" <<'PLIST'
   <key>CFBundleName</key>
   <string>LumenWindow</string>
   <key>CFBundleDisplayName</key>
-  <string>Lumen Window</string>
+  <string>Lumen Translation</string>
   <key>CFBundleIdentifier</key>
   <string>app.lumen.popclip-window</string>
   <key>CFBundleVersion</key>

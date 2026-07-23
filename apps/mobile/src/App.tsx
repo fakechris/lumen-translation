@@ -104,7 +104,7 @@ export default function App() {
         {busy ? "Translating…" : "Translate"}
       </button>
 
-      {error && <div className="result" style={{ borderLeftColor: "#dc2626" }}>{error}</div>}
+      {error && <div className="result" style={{ borderLeftColor: 'var(--lumen-danger)' }}>{error}</div>}
       {result && <div className="result">{result}</div>}
     </div>
   );

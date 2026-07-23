@@ -97,12 +97,14 @@ async function translateSelection() {
   alert(out[0]?.text ?? text);
 }
 
-// Inject minimal styles.
+// Inject minimal styles (Lumen Design System "Atelier" palette).
 const style = document.createElement("style");
 style.textContent = `
-lumen-translation{display:block;margin-top:6px;padding:4px 8px;border-left:3px solid #2563eb;background:rgba(37,99,235,0.05);border-radius:4px;font:inherit;color:inherit}
-.lumen-fab{position:fixed;right:20px;bottom:20px;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#2563eb,#1e40af);color:#fff;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:2147483646;border:none}
-.lumen-fab[data-active="true"]{background:linear-gradient(135deg,#16a34a,#15803d)}
+lumen-translation{display:block;margin-top:6px;padding:4px 12px;border-left:3px solid #9f4f24;background:#f4dfd2;border-radius:4px;font:inherit;color:inherit;transition:background .18s}
+lumen-translation:hover{background:rgba(159,79,36,.18)}
+.lumen-fab{position:fixed;right:20px;bottom:20px;width:48px;height:48px;border-radius:50%;background:#9f4f24;color:#fffdfa;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 16px 48px rgba(31,26,23,.12);z-index:2147483646;border:none;transition:opacity 120ms}
+.lumen-fab:hover{opacity:.88}
+.lumen-fab[data-active="true"]{background:#2f7d52}
 `;
 document.documentElement.appendChild(style);
 
