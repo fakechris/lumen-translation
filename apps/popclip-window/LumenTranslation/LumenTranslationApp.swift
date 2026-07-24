@@ -1,15 +1,15 @@
-// LumenWindow — Bob-style translation window for PopClip.
+// LumenTranslation — translation window for PopClip.
 //
-// Architecture mirrors /Applications/Bob.app (verified via otool -ov):
+// Architecture:
 //   - LSUIElement = true
-//   - NSAppleScriptEnabled = true + OSAScriptingDefinition = LumenWindow.sdef
-//   - NSScriptCommand subclass TranslateCommand (like Bob.ASTranslateCommand)
+//   - NSAppleScriptEnabled = true + OSAScriptingDefinition = LumenTranslation.sdef
+//   - NSScriptCommand subclass TranslateCommand
 //   - TranslateWindow : NSWindow (override initWithContentRect/styleMask,
 //     constrainFrameRect, cancelOperation, close)
 //   - TranslateWindowController : NSWindowController + NSWindowDelegate
 //     (init, loadWindow, windowDidLoad, windowDidResignKey)
 //
-// PopClip action:  tell application "LumenWindow" to translate "text"
+// PopClip action:  tell application "LumenTranslation" to translate "text"
 //
 // LLM providers (configured via Preferences window, opened from the status
 // bar item): Google / Microsoft (free), OpenAI, Anthropic via OpenRouter,
@@ -21,7 +21,7 @@ import Foundation
 // MARK: - App entry
 
 @main
-enum LumenWindowMain {
+enum LumenTranslationMain {
   static func main() {
     let app = NSApplication.shared
     let delegate = AppDelegate()
@@ -96,9 +96,9 @@ final class TranslateCommand: NSScriptCommand {
       source: text, translation: resultTranslation,
       engine: resultEngine,
       sourceLang: prefs.sourceLang, targetLang: prefs.targetLang)
-    NSLog("[LumenWindow] cmd about to show, isMain=\(Thread.isMainThread)")
+    NSLog("[LumenTranslation] cmd about to show, isMain=\(Thread.isMainThread)")
     TranslateWindowController.shared.show(payload: payload)
-    NSLog("[LumenWindow] cmd returned from show")
+    NSLog("[LumenTranslation] cmd returned from show")
     return resultTranslation
   }
 }
@@ -108,7 +108,7 @@ final class TranslateCommand: NSScriptCommand {
 // Receives a JSON record from PopClip with option overrides
 // (engine/apiKey/model/region/sourceLang/targetLang). Values that are empty
 // strings are treated as "PopClip didn't set this" and ignored, so the
-// LumenWindow Preferences UI remains the source of truth for those fields.
+// LumenTranslation Preferences UI remains the source of truth for those fields.
 
 final class ConfigureCommand: NSScriptCommand {
   override func performDefaultImplementation() -> Any? {
@@ -135,7 +135,7 @@ final class ConfigureCommand: NSScriptCommand {
     if let v = dict["targetLang"] as? String, !v.isEmpty {
       prefs.targetLang = v
     }
-    NSLog("[LumenWindow] configure applied: engine=\(prefs.providerId) region=\(prefs.regionOverride ?? "auto")")
+    NSLog("[LumenTranslation] configure applied: engine=\(prefs.providerId) region=\(prefs.regionOverride ?? "auto")")
     return "ok"
   }
 }
@@ -148,13 +148,13 @@ struct TranslationPayload {
   var targetLang: String
 }
 
-// MARK: - TranslateWindow : NSWindow  (mirrors Bob.TranslateWindow)
+// MARK: - TranslateWindow : NSWindow
 
 final class TranslateWindow: NSWindow {
   override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask,
                 backing backingStoreType: NSWindow.BackingStoreType,
                 defer flag: Bool) {
-    // Borderless, transparent, floating — set in init like Bob does.
+    // Borderless, transparent, floating — set in init.
     let mask: NSWindow.StyleMask = [.borderless, .fullSizeContentView]
     super.init(contentRect: contentRect, styleMask: mask,
                backing: backingStoreType, defer: flag)
@@ -173,7 +173,7 @@ final class TranslateWindow: NSWindow {
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { false }
 
-  // Keep the window on-screen (mirrors Bob's constrainFrameRect:toScreen:).
+  // Keep the window on-screen.
   override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
     guard let screen = screen ?? NSScreen.main else { return frameRect }
     let vf = screen.visibleFrame
@@ -194,13 +194,14 @@ final class TranslateWindow: NSWindow {
   }
 }
 
-// MARK: - TranslateWindowController  (mirrors Bob.TranslateWindowController)
+// MARK: - TranslateWindowController
 
 final class TranslateWindowController: NSWindowController, NSWindowDelegate {
   static let shared = TranslateWindowController()
 
   private var contentView: TranslateContentView?
   private var autoHideTimer: Timer?
+  private var autoHideEnabled = true
 
   private override init(window: NSWindow?) {
     super.init(window: window)
@@ -213,10 +214,10 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func show(payload: TranslationPayload) {
-    NSLog("[LumenWindow] show() enter isMain=\(Thread.isMainThread)")
+    NSLog("[LumenTranslation] show() enter isMain=\(Thread.isMainThread)")
     if self.window == nil {
-      NSLog("[LumenWindow] creating window")
-      // Fixed width 400 (matches Bob). Height is computed below from content
+      NSLog("[LumenTranslation] creating window")
+      // Fixed width 400. Height is computed below from content
       // with a hard cap, so long text scrolls inside the text views rather
       // than making the window arbitrarily tall.
       let rect = NSRect(x: 0, y: 0, width: 400, height: 280)
@@ -231,7 +232,7 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
       self.window = w
     }
     guard let w = self.window, let cv = self.contentView else {
-      NSLog("[LumenWindow] no window or contentView!")
+      NSLog("[LumenTranslation] no window or contentView!")
       return
     }
     cv.update(payload: payload)
@@ -239,10 +240,9 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
     // Activate the app first, then show.
     NSApp.activate(ignoringOtherApps: true)
 
-    // Width is fixed at 400 (matches Bob). Height grows with content; the
-    // internal text views become scrollable only when text exceeds the
-    // available screen height. No artificial max height cap — Bob grows
-    // to ~530+ for long text and we mirror that.
+    // Width is fixed at 400. Height grows with content; the internal text
+    // views become scrollable only when text exceeds the available screen
+    // height. No artificial max height cap — it grows to ~530+ for long text.
     let width = 400
     cv.setTextContainerWidth(CGFloat(width - 32))
     let srcH = cv.sourceTextHeight
@@ -254,7 +254,7 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
     cv.setScrollHeights(source: maxSrc, translation: maxTr)
     // Layout: 16 top + src + 12 + 1 (divider) + 12 + tr + 14 + 24 (button row) + 16 bottom
     let height = max(240, 16 + maxSrc + 12 + 1 + 12 + maxTr + 14 + 24 + 16)
-    NSLog("[LumenWindow] height src=\(srcH) tr=\(trH) final=\(height)")
+    NSLog("[LumenTranslation] height src=\(srcH) tr=\(trH) final=\(height)")
 
     if let screen = NSScreen.main {
       let vf = screen.visibleFrame
@@ -269,15 +269,27 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
 
     showWindow(self)
     w.makeKeyAndOrderFront(nil)
-    NSLog("[LumenWindow] window after show frame=\(w.frame) isVisible=\(w.isVisible)")
+    NSLog("[LumenTranslation] window after show frame=\(w.frame) isVisible=\(w.isVisible)")
 
     autoHideTimer?.invalidate()
-    autoHideTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
-      self?.window?.orderOut(nil)
+    if autoHideEnabled {
+      autoHideTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
+        self?.window?.orderOut(nil)
+      }
     }
   }
 
-  // Hide when we lose focus (mirrors Bob's windowDidResignKey:).
+  func setAutoHide(_ enabled: Bool) {
+    autoHideEnabled = enabled
+    autoHideTimer?.invalidate()
+    if enabled {
+      autoHideTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
+        self?.window?.orderOut(nil)
+      }
+    }
+  }
+
+  // Hide when we lose focus.
   func windowDidResignKey(_ notification: Notification) {
     // Don't auto-close on resignKey; PopClip is invoked while user is still
     // in the source app. Keep the 20s auto-hide timer instead.
@@ -285,7 +297,7 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
 }
 
 
-// MARK: - Content view (AppKit, mirrors Bob: fixed width, scrollable text)
+// MARK: - Content view (AppKit: fixed width, scrollable text)
 
 final class TranslateContentView: NSView {
   private let sourceScrollView = NSScrollView()
@@ -293,11 +305,15 @@ final class TranslateContentView: NSView {
   private let sourceTextView = TranslateContentView.makeTextView()
   private let translationTextView = TranslateContentView.makeTextView()
   private let engineLabel = NSTextField(labelWithString: "")
+  private let statusLabel = NSTextField(labelWithString: "")
   private let copyButton = NSButton()
   private let speakButton = NSButton()
+  private let pinButton = NSButton()
   private let closeButton = NSButton()
   private let divider = NSBox()
   private var currentTranslation = ""
+  private var isPinned = false
+  private var copiedTimer: Timer?
   // Guards against recursive scroll sync.
   private var syncing = false
 
@@ -396,6 +412,11 @@ final class TranslateContentView: NSView {
     engineLabel.textColor = NSColor(srgbRed: 0x71/255, green: 0x67/255, blue: 0x5d/255, alpha: 1)
     engineLabel.translatesAutoresizingMaskIntoConstraints = false
 
+    statusLabel.font = .systemFont(ofSize: 11, weight: .medium)
+    statusLabel.textColor = NSColor(srgbRed: 0x2f/255, green: 0x7d/255, blue: 0x52/255, alpha: 1)
+    statusLabel.translatesAutoresizingMaskIntoConstraints = false
+    statusLabel.isHidden = true
+
     closeButton.bezelStyle = .inline
     closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close")
     closeButton.imagePosition = .imageOnly
@@ -405,6 +426,16 @@ final class TranslateContentView: NSView {
     closeButton.action = #selector(closeAction)
     closeButton.translatesAutoresizingMaskIntoConstraints = false
     closeButton.isBordered = false
+
+    pinButton.bezelStyle = .inline
+    pinButton.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin window")
+    pinButton.imagePosition = .imageOnly
+    pinButton.font = .systemFont(ofSize: 12)
+    pinButton.contentTintColor = NSColor(srgbRed: 0x71/255, green: 0x67/255, blue: 0x5d/255, alpha: 1)
+    pinButton.target = self
+    pinButton.action = #selector(pinAction)
+    pinButton.translatesAutoresizingMaskIntoConstraints = false
+    pinButton.isBordered = false
 
     copyButton.title = "Copy"
     copyButton.bezelStyle = .inline
@@ -434,7 +465,9 @@ final class TranslateContentView: NSView {
     addSubview(translationScrollView)
     addSubview(copyButton)
     addSubview(speakButton)
+    addSubview(statusLabel)
     addSubview(engineLabel)
+    addSubview(pinButton)
     addSubview(closeButton)
 
     let srcC = sourceScrollView.heightAnchor.constraint(equalToConstant: 60)
@@ -466,8 +499,16 @@ final class TranslateContentView: NSView {
       speakButton.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
       speakButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 14),
 
+      statusLabel.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
+      statusLabel.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 8),
+
       engineLabel.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
       engineLabel.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 8),
+
+      pinButton.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
+      pinButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+      pinButton.widthAnchor.constraint(equalToConstant: 22),
+      pinButton.heightAnchor.constraint(equalToConstant: 22),
 
       closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
@@ -487,10 +528,34 @@ final class TranslateContentView: NSView {
   @objc private func copyAction() {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(currentTranslation, forType: .string)
+    statusLabel.stringValue = "Copied"
+    statusLabel.isHidden = false
+    engineLabel.isHidden = true
+    copiedTimer?.invalidate()
+    copiedTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
+      self?.statusLabel.isHidden = true
+      self?.engineLabel.isHidden = false
+    }
   }
 
   @objc private func speakAction() {
     NSSpeechSynthesizer().startSpeaking(currentTranslation)
+  }
+
+  @objc private func pinAction() {
+    isPinned.toggle()
+    if isPinned {
+      pinButton.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Unpin window")
+      pinButton.contentTintColor = NSColor(srgbRed: 0x9f/255, green: 0x4f/255, blue: 0x24/255, alpha: 1)
+    } else {
+      pinButton.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin window")
+      pinButton.contentTintColor = NSColor(srgbRed: 0x71/255, green: 0x67/255, blue: 0x5d/255, alpha: 1)
+    }
+    if isPinned {
+      TranslateWindowController.shared.setAutoHide(false)
+    } else {
+      TranslateWindowController.shared.setAutoHide(true)
+    }
   }
 
   @objc private func closeAction() {
@@ -502,8 +567,7 @@ final class TranslateContentView: NSView {
   // MARK: - Linked scrolling
 
   // When the source view scrolls, the translation view scrolls proportionally.
-  // Scrolling the translation view does NOT move the source (one-way sync),
-  // matching Bob's behaviour.
+  // Scrolling the translation view does NOT move the source (one-way sync).
   @objc private func sourceBoundsChanged() {
     guard !syncing else { return }
     let src = sourceScrollView

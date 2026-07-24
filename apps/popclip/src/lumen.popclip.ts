@@ -2,9 +2,9 @@
 //
 // PopClip loads this as a CommonJS module (Config.json `"module": "script.js"`)
 // and calls the exported `action(input, options)` when the user clicks Lumen.
-// The action translates, then opens the LumenWindow companion app via the
-// `lumenwindow://` URL scheme so the result renders in a Bob-style floating
-// window near the cursor (instead of PopClip's small bar). A fetch-on-axios
+// The action translates, then opens the LumenTranslation companion app so the
+// result renders in a floating window near the cursor (instead of PopClip's
+// small bar). A fetch-on-axios
 // polyfill is installed at module load so the existing @lumen/engines work.
 
 import { translateAll, type Engine, type Segment } from "@lumen/core";

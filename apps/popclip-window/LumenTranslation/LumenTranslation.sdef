@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
-<dictionary title="LumenWindow">
-  <suite name="LumenWindow Suite" code="LWsf" description="LumenWindow scripting">
+<dictionary title="LumenTranslation">
+  <suite name="LumenTranslation Suite" code="LWsf" description="LumenTranslation scripting">
     <command name="translate" code="LWsftran" description="Translate text and show a window">
-      <cocoa class="LumenWindow.TranslateCommand"/>
+      <cocoa class="LumenTranslation.TranslateCommand"/>
       <direct-parameter description="The text to translate" type="text"/>
       <result type="text" description="The translated text"/>
     </command>
     <command name="configure" code="LWsfseto" description="Apply PopClip option overrides (JSON)">
-      <cocoa class="LumenWindow.ConfigureCommand"/>
+      <cocoa class="LumenTranslation.ConfigureCommand"/>
       <direct-parameter description="JSON string with engine/apiKey/model/region/sourceLang/targetLang" type="text"/>
       <result type="text" description="Status: ok or error"/>
     </command>

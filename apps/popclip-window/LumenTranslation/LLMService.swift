@@ -28,17 +28,61 @@ final class TranslationService {
   static let shared = TranslationService()
 
   private let session: URLSession
-  private let googleSystemPrompt = """
-    You are a professional translation engine. Translate the user's text \
-    from {SOURCE} to {TARGET}. Return ONLY the translation, no explanations \
-    or quotes. Preserve line breaks.
+  private let systemPrompt = """
+    You are a professional, native-level translator{SOURCE_HINT}. \
+    Translate the user's text into {TARGET_LABEL}, producing a version that \
+    reads as if originally written by a fluent native speaker — faithful, \
+    natural, and idiomatic (信达雅).
+
+    Rules:
+    - Convey the meaning, not the words. Rewrite phrasing so it flows \
+    naturally in {TARGET_LABEL}; never produce word-for-word or stiff, \
+    machine-sounding output.
+    - Match the register and tone of the original: casual stays casual, \
+    formal stays formal. Do NOT over-formalize or "improve" the writing.
+    - Use the target language's own idioms, word order, and punctuation \
+    conventions rather than mirroring the source structure.
+    - Preserve the original meaning, tone, paragraph breaks, and level of \
+    formality.
+    - Keep product names, brand names, person names, URLs, email addresses, \
+    code, and file paths unchanged unless they have a widely accepted \
+    localized form.
+    - If part of the input is already in {TARGET_LABEL}, keep it natural and \
+    do not comment on it.
+    - Return only the translation. Do not add explanations, labels, notes, \
+    or a preamble.
     """
+
+  private static func langLabel(_ code: String) -> String {
+    switch code.lowercased() {
+    case "zh-cn", "zh-hans", "zh": return "Simplified Chinese"
+    case "zh-tw", "zh-hant": return "Traditional Chinese"
+    case "en": return "English"
+    case "ja": return "Japanese"
+    case "ko": return "Korean"
+    case "fr": return "French"
+    case "de": return "German"
+    case "es": return "Spanish"
+    case "ru": return "Russian"
+    case "ar": return "Arabic"
+    case "it": return "Italian"
+    case "pt": return "Portuguese"
+    case "th": return "Thai"
+    case "vi": return "Vietnamese"
+    case "id": return "Indonesian"
+    case "hi": return "Hindi"
+    case "tr": return "Turkish"
+    case "nl": return "Dutch"
+    case "pl": return "Polish"
+    default: return code
+    }
+  }
 
   init() {
     let cfg = URLSessionConfiguration.default
     cfg.timeoutIntervalForRequest = 30
     cfg.timeoutIntervalForResource = 60
-    cfg.httpAdditionalHeaders = ["User-Agent": "LumenWindow/0.1"]
+    cfg.httpAdditionalHeaders = ["User-Agent": "LumenTranslation/0.1"]
     session = URLSession(configuration: cfg)
   }
 
@@ -139,7 +183,7 @@ final class TranslationService {
     completion: @escaping (TranslationOutcome) -> Void
   ) {
     guard !preset.needsKey || !apiKey.isEmpty else {
-      completion(.failure("No API key set for \(preset.label). Open LumenWindow → Preferences to add one."))
+      completion(.failure("No API key set for \(preset.label). Open Lumen Translation menu bar → Settings to add one."))
       return
     }
     guard let url = URL(string: endpoint) else {
@@ -147,9 +191,17 @@ final class TranslationService {
       return
     }
 
-    let system = googleSystemPrompt
-      .replacingOccurrences(of: "{SOURCE}", with: source == "auto" ? "the source language" : source)
-      .replacingOccurrences(of: "{TARGET}", with: target)
+    let targetLabel = TranslationService.langLabel(target)
+    let sourceHint: String
+    if source == "auto" || source.isEmpty {
+      sourceHint = ""
+    } else {
+      sourceHint = " (from \(TranslationService.langLabel(source)))"
+    }
+
+    let system = systemPrompt
+      .replacingOccurrences(of: "{TARGET_LABEL}", with: targetLabel)
+      .replacingOccurrences(of: "{SOURCE_HINT}", with: sourceHint)
 
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
@@ -164,7 +216,7 @@ final class TranslationService {
 
     let body: [String: Any] = [
       "model": model,
-      "temperature": 0,
+      "temperature": 0.3,
       "messages": [
         ["role": "system", "content": system],
         ["role": "user", "content": text],
