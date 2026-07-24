@@ -14,8 +14,23 @@ Lumen Translation lets you read, write, watch, and attend meetings in any langua
 
 ---
 
+## Quick start (onboarding)
+
+The fastest way to try Lumen is the **browser extension** — three steps, about two minutes, no account required.
+
+1. **Install** — Download `lumen-chrome.zip` from the [latest release](https://github.com/fakechris/lumen-translation/releases/latest), unzip it, open `chrome://extensions`, turn on **Developer mode** (top-right), click **Load unpacked**, and select the unzipped folder.
+2. **Pick an engine** — Click the Lumen toolbar icon → **Options**. The default **Google Translate** works with no key. For higher-quality LLM translation, choose a provider (OpenAI, DeepSeek, GLM, Kimi, …) and paste **your own API key** — it never leaves your device.
+3. **Translate** — On any page press **`Alt+Q`** to render it bilingually. Select text and press **`Alt+S`** for a selection popup. Hold **`Alt`** and hover a paragraph to translate just that block.
+
+That's it — no sign-in, no proxy, no telemetry. Settings, rules, and API keys stay local.
+
+> Prefer another surface? See [Installation](#installation) for the userscript, macOS PopClip + companion app, mobile shell, and self-hosted sync.
+
+---
+
 ## Table of contents
 
+- [Quick start (onboarding)](#quick-start-onboarding)
 - [Product capabilities](#product-capabilities)
 - [Translation engines](#translation-engines)
 - [Keyboard shortcuts](#keyboard-shortcuts)
@@ -172,11 +187,49 @@ pnpm --filter @lumen/extension safari:build  # build & open in Safari
 
 Install `lumen.user.js` from the release assets. A lighter fallback that reuses `@lumen/core` / `@lumen/engines` / `@lumen/dom`.
 
-### macOS PopClip
+### macOS PopClip + Lumen Translation app
 
-1. Download `Lumen.popclipextz` (or the `Lumen.popclipext` folder).
-2. Double-click to install.
-3. Select text in any macOS app → Lumen appears in the PopClip bar with **show** / **copy** / **paste** actions.
+The macOS experience is **two pieces that work together**:
+
+- **Lumen PopClip extension** (`apps/popclip`) — adds a **Lumen** button to the PopClip bar when you select text.
+- **Lumen Translation.app** (`apps/popclip-window`) — a menu-bar companion that renders the translation in a floating window near your cursor and stores your provider / model / API-key settings.
+
+They are a set: the PopClip button hands the selected text plus your option choices to the app over AppleScript, and the app shows the result. Install both.
+
+Requirements: [PopClip](https://pilotmoon.com/popclip/), macOS 13+ (Apple Silicon).
+
+**1. Install the companion app**
+
+Built from source (no notarized release yet):
+
+```bash
+cd apps/popclip-window
+bash build.sh                              # → dist/LumenTranslation.app
+cp -R dist/LumenTranslation.app /Applications/
+open /Applications/LumenTranslation.app
+```
+
+First launch may be blocked by Gatekeeper (the app isn't signed yet). Right-click the app → **Open** → **Open**, or clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/LumenTranslation.app
+```
+
+A menu-bar icon appears — click it → **Settings** to choose a provider, model, and API key.
+
+**2. Install the PopClip extension**
+
+```bash
+cd apps/popclip
+pnpm build                                 # → dist/Lumen.popclipext
+open dist/Lumen.popclipext                 # double-click to install into PopClip
+```
+
+Or download `Lumen.popclipextz` from the [latest release](https://github.com/fakechris/lumen-translation/releases/latest) and double-click it.
+
+**3. Use it**
+
+Select text in any macOS app → click **Lumen** in the PopClip bar → the translation appears in the floating window. Switch engine / target language per selection from the PopClip extension's options, or manage everything from the app's **Settings**.
 
 ### Mobile (iOS / Android)
 
@@ -217,11 +270,12 @@ packages/
   meetings/    @lumen/meetings    Meet/Teams/Zoom caption capture + translator + overlay
 
 apps/
-  extension/   @lumen/extension   WXT cross-browser app (Chrome/Edge/Firefox/Safari)
-  userscript/  @lumen/userscript  Tampermonkey/Violentmonkey build
-  popclip/     @lumen/popclip     macOS PopClip extension (esbuild IIFE)
-  worker/      @lumen/worker      Cloudflare Workers sync backend (Hono + KV)
-  mobile/      @lumen/mobile      Capacitor shell (Vite + React)
+  extension/     @lumen/extension  WXT cross-browser app (Chrome/Edge/Firefox/Safari)
+  userscript/    @lumen/userscript Tampermonkey/Violentmonkey build
+  popclip/       @lumen/popclip    macOS PopClip extension (esbuild IIFE)
+  popclip-window/ LumenTranslation macOS menu-bar companion app (Swift/AppKit floating window)
+  worker/        @lumen/worker     Cloudflare Workers sync backend (Hono + KV)
+  mobile/        @lumen/mobile     Capacitor shell (Vite + React)
 
 sites/         Community site-adaptation rules
 tools/         Build/icon scripts
@@ -244,7 +298,10 @@ pnpm test             # vitest across all workspaces
 pnpm build            # build all packages + extension + userscript + popclip
 pnpm --filter @lumen/extension zip        # chrome zip
 pnpm --filter @lumen/extension zip:firefox
+bash apps/popclip-window/build.sh         # macOS companion app (needs macOS + swiftc)
 ```
+
+The macOS companion app (`apps/popclip-window`) is a Swift/AppKit target built with `swiftc`, not part of the pnpm graph, so build it separately with the script above (macOS 13+, Apple Silicon).
 
 Releasing: push a `v*` tag. The `release.yml` workflow builds every artifact and attaches them to a GitHub Release.
 
