@@ -32,14 +32,17 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Build library packages first: they expose types only via ./dist, so
+      # dependents (e.g. @lumen/meetings) can't resolve @lumen/core during
+      # typecheck until dist exists.
+      - name: Build library packages
+        run: pnpm -r --filter "./packages/**" build
+
       - name: Typecheck
         run: pnpm -r typecheck
 
       - name: Test
         run: pnpm -r test
-
-      - name: Build library packages
-        run: pnpm -r --filter "./packages/**" build
 
       - name: Build Chrome extension
         run: pnpm --filter "@lumen/extension" build
@@ -92,12 +95,18 @@ jobs:
             echo "- \`lumen-firefox.zip\` — Firefox MV2 extension (about:debugging → This Firefox → Load Temporary Add-on)"
             echo "- \`lumen.user.js\` — Tampermonkey/Violentmonkey userscript"
             echo "- \`Lumen.popclipext\` / \`Lumen.popclipextz\` — macOS PopClip extension (double-click .popclipext to install)"
+            echo "- \`LumenTranslation.app.zip\` — macOS menu-bar companion app (Apple Silicon; pairs with the PopClip extension)"
             echo "- \`lumen-mobile-web.tar.gz\` — Capacitor mobile web bundle (run \`cap add ios/android\` then \`cap sync\`)"
             echo ""
             echo "## Quick start"
             echo "1. Download \`lumen-chrome.zip\`, unzip, load unpacked in chrome://extensions"
             echo "2. Or download \`lumen.user.js\` and install in Tampermonkey"
             echo "3. Alt+Q translate page, Alt+S selection, Alt+hover paragraph"
+            echo ""
+            echo "## macOS (PopClip + companion app)"
+            echo "1. Unzip \`LumenTranslation.app.zip\` into /Applications and open it (right-click → Open if Gatekeeper blocks it, or \`xattr -dr com.apple.quarantine\`)"
+            echo "2. Double-click \`Lumen.popclipextz\` to install the PopClip extension"
+            echo "3. Select text → click Lumen in the PopClip bar → translation shows in the floating window"
           } > release-notes.md
 
       - name: Create GitHub Release
@@ -112,4 +121,26 @@ jobs:
             artifacts/Lumen.popclipextz
             artifacts/lumen-mobile-web.tar.gz
             artifacts/lumen-chrome-unpacked/**
+          fail_on_unmatched_files: true
+
+  macos-app:
+    name: Build macOS companion app
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build LumenTranslation.app
+        run: bash apps/popclip-window/build.sh
+
+      - name: Zip app (preserve bundle metadata)
+        run: |
+          cd apps/popclip-window/dist
+          ditto -c -k --keepParent LumenTranslation.app LumenTranslation.app.zip
+          ls -la
+
+      - name: Attach app to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/popclip-window/dist/LumenTranslation.app.zip
           fail_on_unmatched_files: true

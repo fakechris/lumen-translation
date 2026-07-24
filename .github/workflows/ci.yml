@@ -25,6 +25,12 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      # Library packages expose types only via ./dist, so build them first;
+      # otherwise dependents (e.g. @lumen/meetings) can't resolve @lumen/core
+      # during typecheck/lint.
+      - name: Build library packages
+        run: pnpm -r --filter "./packages/**" build
+
       - name: Typecheck
         run: pnpm -r typecheck
 
