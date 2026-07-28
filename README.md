@@ -261,7 +261,7 @@ A pnpm monorepo. Core packages are engine-agnostic and DOM-agnostic so every app
 ```
 packages/
   core/        @lumen/core        Engine/Segment/Rule/Settings, batch+concurrency pipeline, dedupe
-  engines/     @lumen/engines     Google/Microsoft/DeepL/OpenAI/Ollama + 13 LLM providers, streaming
+  engines/     @lumen/engines     Google/Microsoft/DeepL/OpenAI/Ollama + catalog-driven LLM providers, streaming
   dom/         @lumen/dom         Paragraph detection + rich-text-preserving bilingual render
   subtitles/   @lumen/subtitles   SRT/VTT parse, cue merge/split, AI split, video adapter framework
   pdf/         @lumen/pdf         pdf.js extraction + bilingual reflow
@@ -282,6 +282,23 @@ tools/         Build/icon scripts
 ```
 
 Heavy dependencies (pdf.js, tesseract.js, jszip) are dynamically imported so they only load when their feature is used.
+
+### Provider catalog (lumen-suite contract)
+
+The LLM provider presets in `@lumen/engines` are no longer hand-maintained. They are derived
+from the Lumen product-suite data contract `lumen.provider-catalog/v1`
+([fakechris/lumen-suite](https://github.com/fakechris/lumen-suite), `contracts/provider-catalog.v1.json`),
+vendored byte-for-byte at `packages/engines/src/provider-catalog.v1.json` and embedded at compile
+time via a JSON import. `PROVIDER_CATALOG` in `packages/engines/src/providers.ts` is a filtered
+adapter view of that JSON (OpenAI-compatible chat providers), including per-provider
+`quirks.no_thinking` data used to disable chain-of-thought output on reasoning models.
+
+- To pull the latest catalog: `pnpm sync:provider-catalog` (never hand-edit the vendored JSON).
+- Contract-conformance tests live in `packages/engines/src/__tests__/provider-catalog.test.ts`.
+- Known remaining copy: the Swift macOS companion app (`apps/popclip-window`,
+  `LumenTranslation/Preferences.swift`) still hardcodes its own provider shortlist — it is the
+  last un-migrated consumer and should eventually load the same vendored JSON as a bundle
+  resource.
 
 ---
 
