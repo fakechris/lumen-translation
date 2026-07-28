@@ -25,12 +25,20 @@ swiftc \
   -module-name LumenTranslation \
   -o "${MACOS_DIR}/${APP_NAME}" \
   "${APP_NAME}/${APP_NAME}App.swift" \
+  "${APP_NAME}/ProviderCatalog.swift" \
   "${APP_NAME}/Preferences.swift" \
   "${APP_NAME}/LLMService.swift" \
   "${APP_NAME}/PreferencesWindow.swift"
 
 # Copy the scripting definition (AppleScript `translate` keyword).
 cp "${APP_NAME}/${APP_NAME}.sdef" "${RESOURCES_DIR}/${APP_NAME}.sdef"
+
+# Provider presets are data-driven: bundle the vendored lumen-suite provider
+# catalog contract (lumen.provider-catalog/v1). The JSON is a byte-for-byte
+# copy of lumen-suite contracts/provider-catalog.v1.json, refreshed via
+# `node scripts/sync-provider-catalog.mjs` — never hand-edit it.
+cp ../../packages/engines/src/provider-catalog.v1.json \
+  "${RESOURCES_DIR}/provider-catalog.v1.json"
 
 # Copy the menu bar template icon.
 cp "${APP_NAME}/statusicon.png" "${RESOURCES_DIR}/statusicon.png"

@@ -12,8 +12,9 @@
 // PopClip action:  tell application "LumenTranslation" to translate "text"
 //
 // LLM providers (configured via Preferences window, opened from the status
-// bar item): Google / Microsoft (free), OpenAI, Anthropic via OpenRouter,
-// Kimi, GLM, MiniMax, DeepSeek. Region (China vs overseas) auto-detected.
+// bar item) are driven by the vendored lumen-suite provider catalog (see
+// ProviderCatalog.swift): Google / Microsoft (free), OpenAI, OpenRouter
+// (incl. Claude), Kimi, GLM, MiniMax, DeepSeek. Region auto-detected.
 
 import AppKit
 import Foundation

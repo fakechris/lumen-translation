@@ -156,9 +156,11 @@ struct ProviderTab: View {
             }
           }
 
-          Link(destination: URL(string: currentPreset.docsURL)!) {
-            Label("Get API key", systemImage: "arrow.up.right.square")
-              .font(.caption)
+          if let docs = currentPreset.docsURL, let docsURL = URL(string: docs) {
+            Link(destination: docsURL) {
+              Label("Get API key", systemImage: "arrow.up.right.square")
+                .font(.caption)
+            }
           }
         }
       } else {
