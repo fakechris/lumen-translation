@@ -1,15 +1,90 @@
 import type { Engine } from "@lumen/core";
 import { createOpenAIEngine, type OpenAIEngineOptions } from "./openai.js";
+import rawCatalog from "./provider-catalog.v1.json";
 
 /**
- * Built-in LLM provider presets. All of these expose an OpenAI-compatible
- * chat-completions endpoint, so they are thin wrappers over
- * {@link createOpenAIEngine} that pre-fill the endpoint and a sensible default
- * model. Users only need to supply an API key.
+ * Built-in LLM provider presets, derived from the Lumen product-suite
+ * provider catalog contract (`lumen.provider-catalog/v1`).
  *
- * For providers with separate domestic / overseas endpoints (MiniMax), pick
- * the endpoint via the `region` option.
+ * The vendored `provider-catalog.v1.json` is a byte-for-byte copy of the
+ * canonical file in the lumen-suite repo
+ * (https://github.com/fakechris/lumen-suite/blob/main/contracts/provider-catalog.v1.json).
+ * Do NOT hand-edit it — run `node scripts/sync-provider-catalog.mjs` to pull
+ * the latest copy. `PROVIDER_CATALOG` below is a filtered adapter view of that
+ * JSON; provider data (endpoints, default models, auth, quirks) must never be
+ * hardcoded here again.
+ *
+ * All exposed presets are OpenAI-compatible chat-completions endpoints, so
+ * they are thin wrappers over {@link createOpenAIEngine} that pre-fill the
+ * endpoint and a sensible default model. Users only need to supply an API key.
+ *
+ * For providers with separate domestic / overseas endpoints (MiniMax, GLM,
+ * SiliconFlow), pick the endpoint via the `region` option.
  */
+
+// ---------------------------------------------------------------------------
+// Catalog JSON shape (subset of contracts/provider-catalog.schema.json that
+// this adapter consumes).
+// ---------------------------------------------------------------------------
+
+interface CatalogEndpoint {
+  base_url: string;
+  notes?: string;
+}
+
+interface CatalogNoThinking {
+  strategy: string;
+  body_params: Record<string, unknown>;
+  /** Case-insensitive substrings; inject only when the model name matches. */
+  model_filter?: string[];
+  notes?: string;
+}
+
+interface CatalogQuirks {
+  no_thinking?: CatalogNoThinking;
+  thinking_not_disableable_models?: string[];
+  strip_thinking_tags?: boolean;
+  legacy_endpoints?: Record<string, string>;
+  attribution_headers_configurable?: boolean;
+  notes?: string;
+}
+
+export interface CatalogProvider {
+  id: string;
+  aliases?: string[];
+  display_name: { en: string; zh?: string };
+  api_style: string;
+  region: "cn" | "global" | "both" | "local";
+  capabilities: string[];
+  endpoints?: {
+    cn?: CatalogEndpoint;
+    global?: CatalogEndpoint;
+    local?: CatalogEndpoint;
+  };
+  chat_path?: string;
+  default_model?: string;
+  models?: string[];
+  needs_key: boolean;
+  auth?: { header: string; value_template: string };
+  extra_headers?: Record<string, string>;
+  docs_url?: string;
+  quirks?: CatalogQuirks;
+  notes?: string;
+}
+
+export interface ProviderCatalogFile {
+  spec: string;
+  version: string;
+  providers: CatalogProvider[];
+}
+
+/** The full vendored catalog file (all 26 providers, unfiltered). */
+export const PROVIDER_CATALOG_SOURCE: ProviderCatalogFile =
+  rawCatalog as unknown as ProviderCatalogFile;
+
+// ---------------------------------------------------------------------------
+// Adapter: catalog entry -> ProviderPreset (public API shape is unchanged).
+// ---------------------------------------------------------------------------
 
 export interface ProviderPreset {
   id: string;
@@ -32,174 +107,103 @@ export interface ProviderPreset {
   headers?: Record<string, string>;
   /** Documentation / where to get a key. */
   docs?: string;
+  /** Catalog region: cn / global / both (separate cn+global endpoints). */
+  region?: "cn" | "global" | "both" | "local";
+  /** Historical ids used by other Lumen apps; resolved by getProviderPreset. */
+  aliases?: string[];
+  /**
+   * When set, these body params are merged into chat requests to disable
+   * chain-of-thought "thinking" output (from catalog `quirks.no_thinking`).
+   * Translation wants fast, terse completions, so thinking is disabled by
+   * default; opt out per call via `ProviderEngineOptions.injectNoThinking`.
+   */
+  noThinking?: {
+    bodyParams: Record<string, unknown>;
+    /** Case-insensitive substrings; inject only when the model matches. */
+    modelFilter?: string[];
+  };
 }
 
-export const PROVIDER_CATALOG: ProviderPreset[] = [
-  {
-    id: "deepseek",
-    label: "DeepSeek 深度求索",
-    endpoint: "https://api.deepseek.com/v1/chat/completions",
-    model: "deepseek-chat",
-    models: ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
-    needsKey: true,
-    docs: "https://platform.deepseek.com/api-keys",
-  },
-  {
-    id: "glm",
-    label: "GLM 智谱 BigModel",
-    endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    model: "glm-4-flash",
-    models: ["glm-4-plus", "glm-4-air", "glm-4-flash", "glm-4-long", "glm-4"],
-    needsKey: true,
-    docs: "https://open.bigmodel.cn/usercenter/apikeys",
-  },
-  {
-    id: "kimi",
-    label: "Kimi 月之暗面 Moonshot",
-    endpoint: "https://api.moonshot.cn/v1/chat/completions",
-    model: "moonshot-v1-8k",
-    models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "kimi-latest"],
-    needsKey: true,
-    docs: "https://platform.moonshot.cn/console/api-keys",
-  },
-  {
-    id: "minimax",
-    label: "MiniMax 大模型（文本）",
-    endpoint: "https://api.minimaxi.com/v1/text/chatcompletion_v2",
-    overseasEndpoint: "https://api.minimax.chat/v1/text/chatcompletion_v2",
-    model: "MiniMax-Text-01",
-    models: ["MiniMax-Text-01", "abab6.5s-chat", "abab6.5-chat", "abab6-chat"],
-    needsKey: true,
-    docs: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-  },
-  {
-    id: "doubao",
-    label: "豆包 字节火山方舟 Ark",
-    endpoint: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-    // Use the stable, non-dated Doubao model id. Dated snapshots (e.g.
-    // `doubao-1-5-pro-32k-250115`) expire and stop serving; `doubao-pro-32k`
-    // is the non-snapshot alias Volcengine keeps pointed at the current
-    // production tier.
-    model: "doubao-pro-32k",
-    models: [
-      "doubao-pro-32k",
-      "doubao-pro-128k",
-      "doubao-lite-32k",
-      "doubao-lite-128k",
-      "doubao-1-5-pro-32k-250115",
-      "doubao-1-5-lite-32k-250115",
-    ],
-    needsKey: true,
-    docs: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
-  },
-  {
-    id: "qwen",
-    label: "通义千问 阿里 DashScope",
-    endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    model: "qwen-plus",
-    models: ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-long", "qwen2.5-72b-instruct"],
-    needsKey: true,
-    docs: "https://dashscope.console.aliyun.com/apiKey",
-  },
-  {
-    id: "hunyuan",
-    label: "腾讯混元 Hunyuan",
-    endpoint: "https://api.hunyuan.cloud.tencent.com/v1/chat/completions",
-    model: "hunyuan-turbo",
-    models: ["hunyuan-turbo", "hunyuan-pro", "hunyuan-standard", "hunyuan-lite"],
-    needsKey: true,
-    docs: "https://console.cloud.tencent.com/hunyuan/api-key",
-  },
-  {
-    id: "ernie",
-    label: "百度文心 ERNIE 千帆",
-    endpoint: "https://qianfan.baidubce.com/v2/chat/completions",
-    model: "ernie-4.0-8k-latest",
-    models: [
-      "ernie-4.0-8k-latest",
-      "ernie-3.5-8k-latest",
-      "ernie-speed-8k",
-      "ernie-speed-128k",
-      "ernie-lite-8k",
-    ],
-    needsKey: true,
-    docs: "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
-  },
-  {
-    id: "spark",
-    label: "讯飞星火 Spark",
-    endpoint: "https://spark-api-open.xf-yun.com/v1/chat/completions",
-    // `generalv3.5` (Max) and `generalv3` were retired by iFlytek on
-    // 2026-03-10. The current OpenAI-compatible endpoint serves `4.0Ultra`,
-    // `max-32k`, `pro-128k`, and `lite`.
-    model: "4.0Ultra",
-    models: ["4.0Ultra", "max-32k", "pro-128k", "lite"],
-    needsKey: true,
-    docs: "https://www.xfyun.cn/doc/spark/HTTP%E8%B0%83%E7%94%A8%E6%96%87%E6%A1%A3.html",
-  },
-  {
-    id: "baichuan",
-    label: "百川 Baichuan",
-    endpoint: "https://api.baichuan-ai.com/v1/chat/completions",
-    model: "Baichuan4-Turbo",
-    models: ["Baichuan4-Turbo", "Baichuan4", "Baichuan3-Turbo", "Baichuan3-Turbo-128k"],
-    needsKey: true,
-    docs: "https://platform.baichuan-ai.com/console/apikey",
-  },
-  {
-    id: "yi",
-    label: "零一万物 Yi (01.AI)",
-    endpoint: "https://api.lingyiwanwu.com/v1/chat/completions",
-    model: "yi-large",
-    models: ["yi-large", "yi-medium", "yi-spark", "yi-lightning"],
-    needsKey: true,
-    docs: "https://platform.lingyiwanwu.com/apikeys",
-  },
-  {
-    id: "siliconflow",
-    label: "硅基流动 SiliconFlow（聚合）",
-    endpoint: "https://api.siliconflow.cn/v1/chat/completions",
-    overseasEndpoint: "https://api.siliconflow.com/v1/chat/completions",
-    model: "deepseek-ai/DeepSeek-V3",
-    models: [
-      "deepseek-ai/DeepSeek-V3",
-      "deepseek-ai/DeepSeek-R1",
-      "Qwen/Qwen2.5-72B-Instruct",
-      "Qwen/Qwen2.5-Coder-32B-Instruct",
-      "meta-llama/Meta-Llama-3.1-405B-Instruct",
-      "glm-4-9b-chat",
-    ],
-    needsKey: true,
-    docs: "https://cloud.siliconflow.cn/account/ak",
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter（海外聚合）",
-    endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "openai/gpt-4o-mini",
-    models: [
-      "openai/gpt-4o-mini",
-      "openai/gpt-4o",
-      "anthropic/claude-3.5-sonnet",
-      "google/gemini-flash-1.5",
-      "deepseek/deepseek-chat",
-    ],
-    needsKey: true,
-    // OpenRouter rewards apps that send an HTTP-Referer + X-Title with higher
-    // rate limits. These are neutral defaults — the repo URL and product name.
-    // Callers can override either header (or add their own) via
-    // `ProviderEngineOptions` / `OpenAIEngineOptions.headers`, which merge on
-    // top of these.
-    headers: {
-      "HTTP-Referer": "https://github.com/fakechris/lumen-translation",
-      "X-Title": "Lumen Translation",
-    },
-    docs: "https://openrouter.ai/keys",
-  },
-];
+/**
+ * Compose a UI label from the bilingual display name. If the Chinese name
+ * already contains the vendor's Latin name (e.g. "MiniMax 大模型"), use it
+ * alone; otherwise prefix the English name ("DeepSeek 深度求索").
+ */
+function toLabel(displayName: { en: string; zh?: string }): string {
+  const { en, zh } = displayName;
+  if (!zh || zh === en) return en;
+  const enFirstWord = en.split(/[\s(（]/)[0]?.toLowerCase() ?? "";
+  if (enFirstWord && zh.toLowerCase().includes(enFirstWord)) return zh;
+  return `${en} ${zh}`;
+}
 
+function toPreset(p: CatalogProvider): ProviderPreset {
+  const chatPath = p.chat_path ?? "/chat/completions";
+  const primary = p.endpoints?.cn ?? p.endpoints?.global ?? p.endpoints?.local;
+  if (!primary) {
+    throw new Error(`provider catalog entry "${p.id}" has no usable endpoint`);
+  }
+  const overseasEndpoint =
+    p.endpoints?.cn && p.endpoints?.global
+      ? p.endpoints.global.base_url + chatPath
+      : undefined;
+  const noThinking =
+    p.quirks?.no_thinking && p.quirks.no_thinking.strategy === "body_params"
+      ? {
+          bodyParams: p.quirks.no_thinking.body_params,
+          modelFilter: p.quirks.no_thinking.model_filter,
+        }
+      : undefined;
+  return {
+    id: p.id,
+    label: toLabel(p.display_name),
+    endpoint: primary.base_url + chatPath,
+    overseasEndpoint,
+    model: p.default_model ?? "",
+    models: p.models ?? [],
+    needsKey: p.needs_key,
+    authHeader: p.auth?.header,
+    authTemplate: p.auth?.value_template,
+    headers: p.extra_headers,
+    docs: p.docs_url,
+    region: p.region,
+    aliases: p.aliases,
+    noThinking,
+  };
+}
+
+/**
+ * Which catalog entries become built-in presets here:
+ * - must be a chat provider speaking the OpenAI-compatible wire protocol
+ *   (excludes `anthropic` — native Messages API — and MT/ASR-only entries);
+ * - local engines are excluded: `ollama` has a dedicated engine
+ *   (`createOllamaEngine`) and `lm_studio` is covered by the apps' custom
+ *   "OpenAI / Compatible" entry;
+ * - `openai` is excluded because the apps expose it as the dedicated custom
+ *   OpenAI-compatible engine (id "openai" is already taken in their UIs).
+ */
+function isBuiltinChatProvider(p: CatalogProvider): boolean {
+  return (
+    p.capabilities.includes("chat") &&
+    p.api_style === "openai_compat" &&
+    p.region !== "local" &&
+    p.id !== "openai"
+  );
+}
+
+export const PROVIDER_CATALOG: ProviderPreset[] =
+  PROVIDER_CATALOG_SOURCE.providers.filter(isBuiltinChatProvider).map(toPreset);
+
+/**
+ * Look up a preset by canonical id, falling back to catalog `aliases` so ids
+ * saved by older builds (or by sibling Lumen apps, e.g. `zhipu`, `glm-cn`,
+ * `volcengine`, `minimax-cn`) keep resolving.
+ */
 export function getProviderPreset(id: string): ProviderPreset | undefined {
-  return PROVIDER_CATALOG.find((p) => p.id === id);
+  return (
+    PROVIDER_CATALOG.find((p) => p.id === id) ??
+    PROVIDER_CATALOG.find((p) => p.aliases?.includes(id))
+  );
 }
 
 export interface ProviderEngineOptions {
@@ -231,11 +235,16 @@ export interface ProviderEngineOptions {
   timeoutMs?: number;
   /** Max retries on 429/503 (default 3). */
   maxRetries?: number;
+  /**
+   * Inject the provider's `no_thinking` body params (from the catalog quirks)
+   * to disable chain-of-thought output on reasoning models. Default true.
+   */
+  injectNoThinking?: boolean;
 }
 
 /**
  * Build an Engine for a built-in provider preset. Returns undefined if the
- * provider id is unknown.
+ * provider id is unknown (after alias resolution).
  */
 export function createProviderEngine(
   providerId: string,
@@ -278,15 +287,31 @@ export function createProviderEngine(
     apiKeyForEngine = undefined;
   }
 
+  // Data-driven "disable thinking" injection (catalog `quirks.no_thinking`):
+  // reasoning models otherwise stream chain-of-thought tokens, which slows
+  // translation down and wastes tokens. A model_filter, when present, limits
+  // injection to matching models (e.g. deepseek-reasoner but not
+  // deepseek-chat).
+  const model = opts.model ?? preset.model;
+  let extraBody: Record<string, unknown> | undefined;
+  if (opts.injectNoThinking !== false && preset.noThinking) {
+    const filter = preset.noThinking.modelFilter;
+    const matches =
+      !filter ||
+      filter.some((f) => model.toLowerCase().includes(f.toLowerCase()));
+    if (matches) extraBody = preset.noThinking.bodyParams;
+  }
+
   const openaiOpts: OpenAIEngineOptions = {
     apiKey: apiKeyForEngine,
     endpoint,
-    model: opts.model ?? preset.model,
+    model,
     temperature: opts.temperature,
     systemPrompt: opts.systemPrompt,
     headers,
     timeoutMs: opts.timeoutMs,
     maxRetries: opts.maxRetries,
+    extraBody,
   };
   const engine = createOpenAIEngine(openaiOpts);
   return { ...engine, id: preset.id, label: preset.label };

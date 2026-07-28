@@ -28,6 +28,13 @@ export interface OpenAIEngineOptions {
   timeoutMs?: number;
   /** Max retries on 429/503 (default 3). */
   maxRetries?: number;
+  /**
+   * Extra JSON fields deep-merged into the chat request body (extra wins on
+   * conflict). Used for provider-specific flags such as the catalog's
+   * `quirks.no_thinking.body_params` (e.g. `{"thinking":{"type":"disabled"}}`
+   * for MiniMax/DeepSeek or `{"enable_thinking":false}` for Qwen).
+   */
+  extraBody?: Record<string, unknown>;
 }
 
 interface ChatChoice {
@@ -37,6 +44,30 @@ interface ChatChoice {
 interface ChatResponse {
   choices?: ChatChoice[];
   error?: { message?: string };
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function buildRequestBody(
+  base: Record<string, unknown>,
+  extra?: Record<string, unknown>,
+): Record<string, unknown> {
+  return extra ? deepMergeBody(base, extra) : base;
+}
+
+/** Deep-merge `extra` into `base` (extra wins on scalar/array conflicts). */
+function deepMergeBody(
+  base: Record<string, unknown>,
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(extra)) {
+    const cur = out[k];
+    out[k] = isPlainObject(cur) && isPlainObject(v) ? deepMergeBody(cur, v) : v;
+  }
+  return out;
 }
 
 const DEFAULT_SYSTEM_PROMPT = `You are a professional translation engine.
@@ -79,15 +110,20 @@ export function createOpenAIEngine(
             ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
             ...opts.headers,
           },
-          body: JSON.stringify({
-            model,
-            temperature: opts.temperature ?? 0,
-            stream: false,
-            messages: [
-              { role: "system", content: system },
-              { role: "user", content: user },
-            ],
-          }),
+          body: JSON.stringify(
+            buildRequestBody(
+              {
+                model,
+                temperature: opts.temperature ?? 0,
+                stream: false,
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ],
+              },
+              opts.extraBody,
+            ),
+          ),
         },
         fetchOpts,
       );
@@ -120,15 +156,20 @@ export function createOpenAIEngine(
             ...(opts.apiKey ? { Authorization: `Bearer ${opts.apiKey}` } : {}),
             ...opts.headers,
           },
-          body: JSON.stringify({
-            model,
-            temperature: opts.temperature ?? 0,
-            stream: true,
-            messages: [
-              { role: "system", content: system },
-              { role: "user", content: user },
-            ],
-          }),
+          body: JSON.stringify(
+            buildRequestBody(
+              {
+                model,
+                temperature: opts.temperature ?? 0,
+                stream: true,
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: user },
+                ],
+              },
+              opts.extraBody,
+            ),
+          ),
         },
         fetchOpts,
       );

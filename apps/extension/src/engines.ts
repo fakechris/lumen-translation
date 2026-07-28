@@ -92,7 +92,9 @@ const LLM_ENTRIES: EngineCatalogEntry[] = PROVIDER_CATALOG.map((p) => ({
   needsKey: p.needsKey,
   models: p.models,
   hasRegion: Boolean(p.overseasEndpoint),
-  group: p.id === "openrouter" ? "llm-overseas" : "llm-cn",
+  // Catalog region drives grouping: providers that only run overseas
+  // (OpenRouter, Gemini) go to the overseas group; cn/both stay domestic.
+  group: p.region === "global" ? "llm-overseas" : "llm-cn",
   docs: p.docs,
 }));
 
