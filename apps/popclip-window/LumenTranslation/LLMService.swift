@@ -28,6 +28,11 @@ final class TranslationService {
   static let shared = TranslationService()
 
   private let session: URLSession
+  // NOTE: The translation system prompt and temperature are intentionally NOT
+  // part of the provider catalog v1 (call-parameter defaults are product
+  // policy, not vendor facts — see lumen-suite contracts/PROVIDER_CATALOG.md
+  // §6.15). This app's prompt/temperature still diverge from the TS engines
+  // (packages/engines); aligning them is deliberately out of scope here.
   private let systemPrompt = """
     You are a professional, native-level translator{SOURCE_HINT}. \
     Translate the user's text into {TARGET_LABEL}, producing a version that \
@@ -89,11 +94,15 @@ final class TranslationService {
   func translate(text: String, completion: @escaping (TranslationOutcome) -> Void) {
     let prefs = Preferences.shared
     let preset = prefs.provider
-    switch preset.id {
-    case "google":
-      googleTranslate(text: text, source: prefs.sourceLang, target: prefs.targetLang, completion: completion)
-    case "microsoft":
-      microsoftTranslate(text: text, source: prefs.sourceLang, target: prefs.targetLang, completion: completion)
+    // Route on the catalog `api_style`: the two free MT engines have
+    // dedicated wire formats; everything else is OpenAI-compatible chat.
+    switch preset.apiStyle {
+    case "google_translate":
+      googleTranslate(endpoint: prefs.endpoint(for: preset), text: text,
+                      source: prefs.sourceLang, target: prefs.targetLang, completion: completion)
+    case "microsoft_translator":
+      microsoftTranslate(endpoint: prefs.endpoint(for: preset), text: text,
+                         source: prefs.sourceLang, target: prefs.targetLang, completion: completion)
     default:
       openAICompatibleTranslate(
         text: text,
@@ -109,9 +118,12 @@ final class TranslationService {
 
   // MARK: - Google free endpoint
 
-  private func googleTranslate(text: String, source: String, target: String,
+  private func googleTranslate(endpoint: String, text: String, source: String, target: String,
                                completion: @escaping (TranslationOutcome) -> Void) {
-    var comps = URLComponents(string: "https://translate.googleapis.com/translate_a/single")!
+    guard var comps = URLComponents(string: endpoint) else {
+      completion(.failure("google: bad endpoint \(endpoint)"))
+      return
+    }
     comps.queryItems = [
       URLQueryItem(name: "client", value: "gtx"),
       URLQueryItem(name: "dt", value: "t"),
@@ -137,10 +149,10 @@ final class TranslationService {
 
   // MARK: - Microsoft free endpoint (no key required)
 
-  private func microsoftTranslate(text: String, source: String, target: String,
+  private func microsoftTranslate(endpoint: String, text: String, source: String, target: String,
                                   completion: @escaping (TranslationOutcome) -> Void) {
     let sl = source == "auto" ? "" : "&from=\(source)"
-    let urlStr = "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0\(sl)&to=\(target)"
+    let urlStr = "\(endpoint)?api-version=3.0\(sl)&to=\(target)"
     guard let url = URL(string: urlStr) else {
       completion(.failure("microsoft: bad URL"))
       return
@@ -214,7 +226,7 @@ final class TranslationService {
     }
     req.timeoutInterval = 30
 
-    let body: [String: Any] = [
+    var body: [String: Any] = [
       "model": model,
       "temperature": 0.3,
       "messages": [
@@ -222,6 +234,13 @@ final class TranslationService {
         ["role": "user", "content": text],
       ],
     ]
+    // Data-driven "disable thinking" injection (catalog quirks.no_thinking):
+    // reasoning models (e.g. MiniMax-M3, deepseek-reasoner) otherwise emit
+    // chain-of-thought tokens, which slows translation down and wastes
+    // tokens. Mirrors createProviderEngine in packages/engines/providers.ts.
+    if let noThinking = preset.noThinkingInjection(for: model) {
+      for (k, v) in noThinking { body[k] = v }
+    }
     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
     runRequest(req) { result in

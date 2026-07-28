@@ -2,6 +2,10 @@
 // and region. Stored in UserDefaults so they survive across launches and are
 // readable from the TranslateCommand handler.
 //
+// Provider presets come from the vendored lumen-suite provider catalog (see
+// ProviderCatalog.swift); this file only handles persistence, legacy-id
+// migration, and region resolution.
+//
 // Region auto-detection (Option 3A): if the user has not explicitly chosen a
 // region, we infer it from the system locale and time zone.
 //   - locale is zh-CN / zh-Hans / zh-Hant *or* timezone starts with "Asia/Shanghai"
@@ -9,123 +13,6 @@
 //   - otherwise -> "overseas"
 
 import Foundation
-
-struct ProviderPreset: Identifiable, Hashable {
-  let id: String
-  let label: String
-  /// Domestic (mainland China) endpoint.
-  let endpointCN: String
-  /// Overseas endpoint; falls back to endpointCN if absent.
-  let endpointOverseas: String?
-  let defaultModel: String
-  let models: [String]
-  let docsURL: String
-  /// Whether this provider needs an API key.
-  let needsKey: Bool
-  /// Optional extra headers.
-  let extraHeaders: [String: String]
-}
-
-enum Providers {
-  /// Curated short-list (Option 2B): OpenAI / Anthropic-via-OpenRouter +
-  /// four major Chinese providers (Kimi, GLM, MiniMax, DeepSeek).
-  static let catalog: [ProviderPreset] = [
-    ProviderPreset(
-      id: "google",
-      label: "Google（免费，无需 Key）",
-      endpointCN: "https://translate.googleapis.com/translate_a/single",
-      endpointOverseas: nil,
-      defaultModel: "gtx",
-      models: ["gtx"],
-      docsURL: "https://translate.google.com",
-      needsKey: false,
-      extraHeaders: [:]),
-    ProviderPreset(
-      id: "microsoft",
-      label: "Microsoft（免费，无需 Key）",
-      endpointCN: "https://api.cognitive.microsofttranslator.com/translate",
-      endpointOverseas: nil,
-      defaultModel: "free",
-      models: ["free"],
-      docsURL: "https://www.bing.com/translator",
-      needsKey: false,
-      extraHeaders: [:]),
-    ProviderPreset(
-      id: "openai",
-      label: "OpenAI (GPT)",
-      endpointCN: "https://api.openai.com/v1/chat/completions",
-      endpointOverseas: nil,
-      defaultModel: "gpt-4o-mini",
-      models: ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
-      docsURL: "https://platform.openai.com/api-keys",
-      needsKey: true,
-      extraHeaders: [:]),
-    ProviderPreset(
-      id: "anthropic",
-      label: "Anthropic (Claude, via OpenRouter)",
-      // Anthropic's native API uses a different request schema than
-      // OpenAI-compatible chat completions. To keep a single code path we
-      // route through OpenRouter, which exposes Claude via the OpenAI schema.
-      endpointCN: "https://openrouter.ai/api/v1/chat/completions",
-      endpointOverseas: nil,
-      defaultModel: "anthropic/claude-3.5-sonnet",
-      models: [
-        "anthropic/claude-3.5-sonnet",
-        "anthropic/claude-3.5-haiku",
-        "anthropic/claude-3-opus",
-      ],
-      docsURL: "https://openrouter.ai/keys",
-      needsKey: true,
-      extraHeaders: [
-        "HTTP-Referer": "https://github.com/fakechris/lumen-translation",
-        "X-Title": "Lumen Translation",
-      ]),
-    ProviderPreset(
-      id: "kimi",
-      label: "Kimi 月之暗面 Moonshot",
-      endpointCN: "https://api.moonshot.cn/v1/chat/completions",
-      endpointOverseas: nil,
-      defaultModel: "moonshot-v1-8k",
-      models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "kimi-latest"],
-      docsURL: "https://platform.moonshot.cn/console/api-keys",
-      needsKey: true,
-      extraHeaders: [:]),
-    ProviderPreset(
-      id: "glm",
-      label: "GLM 智谱 BigModel",
-      endpointCN: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-      endpointOverseas: nil,
-      defaultModel: "glm-4-flash",
-      models: ["glm-4-plus", "glm-4-air", "glm-4-flash", "glm-4-long", "glm-4"],
-      docsURL: "https://open.bigmodel.cn/usercenter/apikeys",
-      needsKey: true,
-      extraHeaders: [:]),
-    ProviderPreset(
-      id: "minimax",
-      label: "MiniMax 大模型",
-      endpointCN: "https://api.minimaxi.com/v1/text/chatcompletion_v2",
-      endpointOverseas: "https://api.minimax.chat/v1/text/chatcompletion_v2",
-      defaultModel: "MiniMax-Text-01",
-      models: ["MiniMax-Text-01", "abab6.5s-chat", "abab6.5-chat", "abab6-chat"],
-      docsURL: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
-      needsKey: true,
-      extraHeaders: [:]),
-    ProviderPreset(
-      id: "deepseek",
-      label: "DeepSeek 深度求索",
-      endpointCN: "https://api.deepseek.com/v1/chat/completions",
-      endpointOverseas: nil,
-      defaultModel: "deepseek-chat",
-      models: ["deepseek-chat", "deepseek-reasoner", "deepseek-coder"],
-      docsURL: "https://platform.deepseek.com/api-keys",
-      needsKey: true,
-      extraHeaders: [:]),
-  ]
-
-  static func find(_ id: String) -> ProviderPreset? {
-    catalog.first { $0.id == id }
-  }
-}
 
 /// Region detection (Option 3A): auto unless user has explicitly chosen.
 enum Region {
@@ -157,9 +44,54 @@ final class Preferences {
     static let sourceLang = "lumen.sourceLang"
   }
 
+  private init() {
+    migrateLegacyProviderData()
+  }
+
+  /// Older builds stored app-local provider ids ("google", "microsoft",
+  /// "anthropic" = Claude via OpenRouter). Resolve them to canonical catalog
+  /// ids (via catalog aliases + Providers.legacyIdMap) and carry saved API
+  /// keys / models over to the canonical namespace. Unknown saved ids fall
+  /// back to the default provider instead of crashing.
+  private func migrateLegacyProviderData() {
+    // Per-provider apiKey/model namespaces.
+    for preset in Providers.catalog {
+      var legacyIds = preset.aliases
+      legacyIds += Providers.legacyIdMap.filter { $0.value == preset.id }.map { $0.key }
+      for old in legacyIds where old != preset.id {
+        if defaults.string(forKey: Key.apiKey + preset.id) == nil,
+           let key = defaults.string(forKey: Key.apiKey + old) {
+          defaults.set(key, forKey: Key.apiKey + preset.id)
+        }
+        if defaults.string(forKey: Key.model + preset.id) == nil,
+           let model = defaults.string(forKey: Key.model + old) {
+          defaults.set(model, forKey: Key.model + preset.id)
+        }
+      }
+    }
+    // Selected provider id.
+    if let saved = defaults.string(forKey: Key.provider) {
+      if let preset = Providers.find(saved) {
+        if preset.id != saved {
+          defaults.set(preset.id, forKey: Key.provider)
+        }
+      } else {
+        // Unknown id (e.g. a provider no longer in the curated list):
+        // fall back to the default.
+        defaults.removeObject(forKey: Key.provider)
+      }
+    }
+  }
+
+  /// Canonical catalog id for any saved/incoming id (handles legacy ids from
+  /// PopClip `configure` calls, e.g. "google" or "anthropic").
+  private func canonicalId(_ id: String) -> String {
+    Providers.find(id)?.id ?? id
+  }
+
   var providerId: String {
-    get { defaults.string(forKey: Key.provider) ?? "google" }
-    set { defaults.set(newValue, forKey: Key.provider) }
+    get { defaults.string(forKey: Key.provider) ?? "google_translate" }
+    set { defaults.set(canonicalId(newValue), forKey: Key.provider) }
   }
 
   var provider: ProviderPreset {
@@ -184,20 +116,21 @@ final class Preferences {
   }
 
   func apiKey(for providerId: String) -> String {
-    defaults.string(forKey: Key.apiKey + providerId) ?? ""
+    defaults.string(forKey: Key.apiKey + canonicalId(providerId)) ?? ""
   }
   func setApiKey(_ key: String, for providerId: String) {
-    defaults.set(key, forKey: Key.apiKey + providerId)
+    defaults.set(key, forKey: Key.apiKey + canonicalId(providerId))
   }
 
   func model(for providerId: String) -> String {
-    if let saved = defaults.string(forKey: Key.model + providerId) {
+    let id = canonicalId(providerId)
+    if let saved = defaults.string(forKey: Key.model + id) {
       return saved
     }
-    return Providers.find(providerId)?.defaultModel ?? ""
+    return Providers.find(id)?.defaultModel ?? ""
   }
   func setModel(_ model: String, for providerId: String) {
-    defaults.set(model, forKey: Key.model + providerId)
+    defaults.set(model, forKey: Key.model + canonicalId(providerId))
   }
 
   var targetLang: String {
