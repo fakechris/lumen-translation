@@ -17,6 +17,7 @@
 // (incl. Claude), Kimi, GLM, MiniMax, DeepSeek. Region auto-detected.
 
 import AppKit
+import Carbon.HIToolbox
 import Foundation
 
 // MARK: - App entry
@@ -33,6 +34,7 @@ enum LumenTranslationMain {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private var statusItem: NSStatusItem!
+  private var reopenHotKey: GlobalHotKey?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     ProcessInfo.processInfo.disableAutomaticTermination("lumen-popclip-window")
@@ -52,12 +54,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
     }
     let menu = NSMenu()
+    let reopenItem = menu.addItem(
+      withTitle: "Show Last Translation", action: #selector(showLastTranslation), keyEquivalent: "l")
+    reopenItem.keyEquivalentModifierMask = [.command, .option]
+    reopenItem.target = self
+    menu.addItem(NSMenuItem.separator())
     let prefsItem = menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
     prefsItem.target = self
     menu.addItem(NSMenuItem.separator())
     let quitItem = menu.addItem(withTitle: "Quit Lumen Translation", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     quitItem.target = NSApplication.shared
     statusItem.menu = menu
+
+    // Global hotkey ⌥⌘L: re-show the last translation from any app, keeping
+    // its original source + translation context.
+    reopenHotKey = GlobalHotKey(keyCode: UInt32(kVK_ANSI_L),
+                                modifiers: UInt32(cmdKey | optionKey)) {
+      TranslateWindowController.shared.showLast()
+    }
+  }
+
+  @objc private func showLastTranslation() {
+    TranslateWindowController.shared.showLast()
   }
 
   @objc private func openPreferences() {
@@ -186,8 +204,20 @@ final class TranslateWindow: NSWindow {
     return f
   }
 
+  // Esc closes (hides) the window.
   override func cancelOperation(_ sender: Any?) {
-    close()
+    orderOut(nil)
+  }
+
+  // ⌘W closes (hides) the window. There's no menu bar for this borderless
+  // window, so handle the key equivalent directly.
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    if flags == .command, event.charactersIgnoringModifiers?.lowercased() == "w" {
+      orderOut(nil)
+      return true
+    }
+    return super.performKeyEquivalent(with: event)
   }
 
   override func close() {
@@ -201,8 +231,9 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
   static let shared = TranslateWindowController()
 
   private var contentView: TranslateContentView?
-  private var autoHideTimer: Timer?
-  private var autoHideEnabled = true
+  // Kept in memory so ⌥⌘L / "Show Last Translation" can re-open the window
+  // with its previous source + translation after it's been closed.
+  private var lastPayload: TranslationPayload?
 
   private override init(window: NSWindow?) {
     super.init(window: window)
@@ -216,6 +247,7 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
 
   func show(payload: TranslationPayload) {
     NSLog("[LumenTranslation] show() enter isMain=\(Thread.isMainThread)")
+    lastPayload = payload
     if self.window == nil {
       NSLog("[LumenTranslation] creating window")
       // Fixed width 400. Height is computed below from content
@@ -271,29 +303,23 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
     showWindow(self)
     w.makeKeyAndOrderFront(nil)
     NSLog("[LumenTranslation] window after show frame=\(w.frame) isVisible=\(w.isVisible)")
-
-    autoHideTimer?.invalidate()
-    if autoHideEnabled {
-      autoHideTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
-        self?.window?.orderOut(nil)
-      }
-    }
   }
 
-  func setAutoHide(_ enabled: Bool) {
-    autoHideEnabled = enabled
-    autoHideTimer?.invalidate()
-    if enabled {
-      autoHideTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
-        self?.window?.orderOut(nil)
-      }
+  // Re-open the most recent translation (⌥⌘L / status-menu item). Beeps if
+  // there's nothing to show yet.
+  func showLast() {
+    guard let payload = lastPayload else {
+      NSSound.beep()
+      return
     }
+    show(payload: payload)
   }
 
-  // Hide when we lose focus.
+  // Close (hide) the window when the user clicks outside it. The window and
+  // its content are retained (isReleasedWhenClosed = false), so the last
+  // translation can be re-opened with ⌥⌘L.
   func windowDidResignKey(_ notification: Notification) {
-    // Don't auto-close on resignKey; PopClip is invoked while user is still
-    // in the source app. Keep the 20s auto-hide timer instead.
+    window?.orderOut(nil)
   }
 }
 
@@ -309,11 +335,9 @@ final class TranslateContentView: NSView {
   private let statusLabel = NSTextField(labelWithString: "")
   private let copyButton = NSButton()
   private let speakButton = NSButton()
-  private let pinButton = NSButton()
   private let closeButton = NSButton()
   private let divider = NSBox()
   private var currentTranslation = ""
-  private var isPinned = false
   private var copiedTimer: Timer?
   // Guards against recursive scroll sync.
   private var syncing = false
@@ -428,16 +452,6 @@ final class TranslateContentView: NSView {
     closeButton.translatesAutoresizingMaskIntoConstraints = false
     closeButton.isBordered = false
 
-    pinButton.bezelStyle = .inline
-    pinButton.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin window")
-    pinButton.imagePosition = .imageOnly
-    pinButton.font = .systemFont(ofSize: 12)
-    pinButton.contentTintColor = NSColor(srgbRed: 0x71/255, green: 0x67/255, blue: 0x5d/255, alpha: 1)
-    pinButton.target = self
-    pinButton.action = #selector(pinAction)
-    pinButton.translatesAutoresizingMaskIntoConstraints = false
-    pinButton.isBordered = false
-
     copyButton.title = "Copy"
     copyButton.bezelStyle = .inline
     copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy")
@@ -468,7 +482,6 @@ final class TranslateContentView: NSView {
     addSubview(speakButton)
     addSubview(statusLabel)
     addSubview(engineLabel)
-    addSubview(pinButton)
     addSubview(closeButton)
 
     let srcC = sourceScrollView.heightAnchor.constraint(equalToConstant: 60)
@@ -506,11 +519,6 @@ final class TranslateContentView: NSView {
       engineLabel.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
       engineLabel.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 8),
 
-      pinButton.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
-      pinButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
-      pinButton.widthAnchor.constraint(equalToConstant: 22),
-      pinButton.heightAnchor.constraint(equalToConstant: 22),
-
       closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
       closeButton.widthAnchor.constraint(equalToConstant: 22),
@@ -543,22 +551,6 @@ final class TranslateContentView: NSView {
     NSSpeechSynthesizer().startSpeaking(currentTranslation)
   }
 
-  @objc private func pinAction() {
-    isPinned.toggle()
-    if isPinned {
-      pinButton.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Unpin window")
-      pinButton.contentTintColor = NSColor(srgbRed: 0x9f/255, green: 0x4f/255, blue: 0x24/255, alpha: 1)
-    } else {
-      pinButton.image = NSImage(systemSymbolName: "pin", accessibilityDescription: "Pin window")
-      pinButton.contentTintColor = NSColor(srgbRed: 0x71/255, green: 0x67/255, blue: 0x5d/255, alpha: 1)
-    }
-    if isPinned {
-      TranslateWindowController.shared.setAutoHide(false)
-    } else {
-      TranslateWindowController.shared.setAutoHide(true)
-    }
-  }
-
   @objc private func closeAction() {
     // Close the enclosing window immediately (no need to wait for the
     // auto-hide timer).
@@ -589,5 +581,57 @@ private extension NSLayoutConstraint {
   func withPriority(_ p: Float) -> NSLayoutConstraint {
     self.priority = NSLayoutConstraint.Priority(rawValue: p)
     return self
+  }
+}
+
+// MARK: - Global hotkey (Carbon)
+//
+// RegisterEventHotKey installs a system-wide hotkey without needing the
+// Accessibility permission and consumes the key event. Used for ⌥⌘L to
+// re-open the last translation from any application.
+
+final class GlobalHotKey {
+  private var hotKeyRef: EventHotKeyRef?
+  private var eventHandler: EventHandlerRef?
+  private let id: UInt32
+  private static var nextID: UInt32 = 1
+  private static var handlers: [UInt32: () -> Void] = [:]
+
+  init?(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) {
+    id = GlobalHotKey.nextID
+    GlobalHotKey.nextID += 1
+    GlobalHotKey.handlers[id] = action
+
+    var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
+                                  eventKind: UInt32(kEventHotKeyPressed))
+    let installStatus = InstallEventHandler(
+      GetApplicationEventTarget(),
+      { (_, event, _) -> OSStatus in
+        var hkID = EventHotKeyID()
+        GetEventParameter(event, EventParamName(kEventParamDirectObject),
+                          EventParamType(typeEventHotKeyID), nil,
+                          MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+        GlobalHotKey.handlers[hkID.id]?()
+        return noErr
+      },
+      1, &eventType, nil, &eventHandler)
+    guard installStatus == noErr else {
+      GlobalHotKey.handlers[id] = nil
+      return nil
+    }
+
+    let hotKeyID = EventHotKeyID(signature: OSType(0x4C554D4E), id: id) // 'LUMN'
+    let status = RegisterEventHotKey(keyCode, modifiers, hotKeyID,
+                                     GetApplicationEventTarget(), 0, &hotKeyRef)
+    guard status == noErr else {
+      GlobalHotKey.handlers[id] = nil
+      return nil
+    }
+  }
+
+  deinit {
+    if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
+    if let eventHandler { RemoveEventHandler(eventHandler) }
+    GlobalHotKey.handlers[id] = nil
   }
 }
