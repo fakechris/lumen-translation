@@ -624,6 +624,7 @@ final class GlobalHotKey {
     let status = RegisterEventHotKey(keyCode, modifiers, hotKeyID,
                                      GetApplicationEventTarget(), 0, &hotKeyRef)
     guard status == noErr else {
+      if let eventHandler { RemoveEventHandler(eventHandler) }
       GlobalHotKey.handlers[id] = nil
       return nil
     }
