@@ -317,19 +317,21 @@ final class TranslationService {
         do {
           let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
           if let err = json["error"] as? [String: Any], let msg = err["message"] as? String {
-            completion(.failure("\(preset.label): \(msg)"))
+            // The fallback driver (`attempt`) prefixes the provider label, so
+            // provider-internal messages stay label-free to avoid duplication.
+            completion(.failure(msg))
             return
           }
           let choices = json["choices"] as? [[String: Any]] ?? []
           let content = (choices.first?["message"] as? [String: Any])?["content"] as? String ?? ""
           let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
           if trimmed.isEmpty {
-            completion(.failure("\(preset.label): empty response"))
+            completion(.failure("empty response"))
           } else {
             completion(.success(trimmed, engine: preset.label))
           }
         } catch {
-          completion(.failure("\(preset.label): \(error.localizedDescription)"))
+          completion(.failure(error.localizedDescription))
         }
       case .failure(let e):
         completion(.failure(e.description))
