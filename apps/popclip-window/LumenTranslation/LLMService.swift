@@ -125,7 +125,9 @@ final class TranslationService {
     add(prefs.provider)
     add(Providers.find("microsoft_translator"))
     add(Providers.find("google_translate"))
-    for preset in Providers.catalog where preset.apiStyle == "openai_compat" {
+    // Any configured LLM: built-in catalog providers plus the user's custom
+    // OpenAI-compatible endpoint slots (both surfaced via `allProviders`).
+    for preset in prefs.allProviders where preset.apiStyle == "openai_compat" {
       add(preset)
     }
     return chain

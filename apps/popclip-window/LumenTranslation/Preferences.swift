@@ -29,6 +29,21 @@ enum Region {
   }
 }
 
+/// A user-defined OpenAI-compatible endpoint slot. Each slot keeps its own
+/// name, base URL, and model; its API key is stored via the same per-id
+/// UserDefaults namespace as the built-in providers (`lumen.apiKey.<id>`).
+/// The `id` is always prefixed `custom:` so it never collides with a catalog id.
+struct CustomProvider: Codable, Identifiable, Hashable {
+  var id: String
+  var name: String
+  var baseURL: String
+  var model: String
+
+  static func make(name: String = "New endpoint", baseURL: String = "", model: String = "") -> CustomProvider {
+    CustomProvider(id: "custom:\(UUID().uuidString)", name: name, baseURL: baseURL, model: model)
+  }
+}
+
 /// Read/write preferences to UserDefaults. Keys are namespaced under
 /// `lumen.popclip-window.*`.
 final class Preferences {
@@ -42,6 +57,7 @@ final class Preferences {
     static let region = "lumen.region"  // "cn" | "overseas"
     static let targetLang = "lumen.targetLang"
     static let sourceLang = "lumen.sourceLang"
+    static let customProviders = "lumen.customProviders" // JSON [CustomProvider]
   }
 
   private init() {
@@ -75,6 +91,8 @@ final class Preferences {
         if preset.id != saved {
           defaults.set(preset.id, forKey: Key.provider)
         }
+      } else if saved.hasPrefix("custom:") {
+        // A user-defined endpoint slot: keep it.
       } else {
         // Unknown id (e.g. a provider no longer in the curated list):
         // fall back to the default.
@@ -95,7 +113,69 @@ final class Preferences {
   }
 
   var provider: ProviderPreset {
-    Providers.find(providerId) ?? Providers.catalog[0]
+    if let p = Providers.find(providerId) { return p }
+    if let c = customProviders.first(where: { $0.id == providerId }) { return customPreset(c) }
+    return Providers.catalog[0]
+  }
+
+  // MARK: - Custom OpenAI-compatible endpoint slots
+
+  var customProviders: [CustomProvider] {
+    get {
+      guard let data = defaults.data(forKey: Key.customProviders),
+            let arr = try? JSONDecoder().decode([CustomProvider].self, from: data) else {
+        return []
+      }
+      return arr
+    }
+    set {
+      if let data = try? JSONEncoder().encode(newValue) {
+        defaults.set(data, forKey: Key.customProviders)
+      }
+    }
+  }
+
+  func removeCustomProvider(id: String) {
+    customProviders = customProviders.filter { $0.id != id }
+    defaults.removeObject(forKey: Key.apiKey + id)
+    defaults.removeObject(forKey: Key.model + id)
+    // If the removed slot was selected, fall back to the default provider.
+    if providerId == id {
+      defaults.set("google_translate", forKey: Key.provider)
+    }
+  }
+
+  /// Adapter view of a custom slot as a ProviderPreset so the translate and
+  /// fallback code paths treat it like any other OpenAI-compatible provider.
+  func customPreset(_ c: CustomProvider) -> ProviderPreset {
+    ProviderPreset(
+      id: c.id,
+      label: c.name.isEmpty ? "Custom Endpoint" : c.name,
+      apiStyle: "openai_compat",
+      endpointCN: Preferences.normalizeChatEndpoint(c.baseURL),
+      endpointOverseas: nil,
+      defaultModel: c.model,
+      models: c.model.isEmpty ? [] : [c.model],
+      docsURL: nil,
+      needsKey: true,
+      extraHeaders: [:],
+      aliases: [],
+      noThinkingBodyParams: nil,
+      noThinkingModelFilter: nil)
+  }
+
+  /// Built-in catalog providers followed by the user's custom slots.
+  var allProviders: [ProviderPreset] {
+    Providers.catalog + customProviders.map { customPreset($0) }
+  }
+
+  /// Accept either a base URL (`https://host/v1`) or a full chat-completions
+  /// URL and normalize to the chat-completions endpoint.
+  static func normalizeChatEndpoint(_ raw: String) -> String {
+    var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    while s.hasSuffix("/") { s.removeLast() }
+    if s.hasSuffix("/chat/completions") { return s }
+    return s + "/chat/completions"
   }
 
   /// Region override. nil means "auto".
@@ -116,10 +196,14 @@ final class Preferences {
   }
 
   func apiKey(for providerId: String) -> String {
-    defaults.string(forKey: Key.apiKey + canonicalId(providerId)) ?? ""
+    // Trim on read too, so keys stored by older builds (or pasted with a
+    // trailing newline via PopClip) don't produce a malformed Bearer header.
+    (defaults.string(forKey: Key.apiKey + canonicalId(providerId)) ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
   }
   func setApiKey(_ key: String, for providerId: String) {
-    defaults.set(key, forKey: Key.apiKey + canonicalId(providerId))
+    let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+    defaults.set(trimmed, forKey: Key.apiKey + canonicalId(providerId))
   }
 
   func model(for providerId: String) -> String {
@@ -127,7 +211,9 @@ final class Preferences {
     if let saved = defaults.string(forKey: Key.model + id) {
       return saved
     }
-    return Providers.find(id)?.defaultModel ?? ""
+    return Providers.find(id)?.defaultModel
+      ?? customProviders.first(where: { $0.id == id })?.model
+      ?? ""
   }
   func setModel(_ model: String, for providerId: String) {
     defaults.set(model, forKey: Key.model + canonicalId(providerId))

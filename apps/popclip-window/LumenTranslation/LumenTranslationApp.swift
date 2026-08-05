@@ -32,9 +32,12 @@ enum LumenTranslationMain {
   }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
   private var reopenHotKey: GlobalHotKey?
+  // Rebuilt each time it opens, so newly added custom slots appear and the
+  // active provider stays checkmarked.
+  private let engineMenu = NSMenu(title: "Engine")
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     ProcessInfo.processInfo.disableAutomaticTermination("lumen-popclip-window")
@@ -59,12 +62,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     reopenItem.keyEquivalentModifierMask = [.command, .option]
     reopenItem.target = self
     menu.addItem(NSMenuItem.separator())
+    // Quick engine switch: pick the active provider without opening Settings.
+    let engineItem = menu.addItem(withTitle: "Engine", action: nil, keyEquivalent: "")
+    engineMenu.delegate = self
+    engineItem.submenu = engineMenu
+    menu.addItem(NSMenuItem.separator())
     let prefsItem = menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
     prefsItem.target = self
     menu.addItem(NSMenuItem.separator())
     let quitItem = menu.addItem(withTitle: "Quit Lumen Translation", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     quitItem.target = NSApplication.shared
     statusItem.menu = menu
+    NSLog("[LumenTranslation] status item ready: hasButton=\(statusItem.button != nil) menuItems=\(menu.numberOfItems) providers=\(Preferences.shared.allProviders.count)")
 
     // Global hotkey ⌥⌘L: re-show the last translation from any app, keeping
     // its original source + translation context.
@@ -80,6 +89,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc private func openPreferences() {
     PreferencesWindowController.show()
+  }
+
+  @objc private func selectEngine(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String else { return }
+    Preferences.shared.providerId = id
+  }
+
+  // NSMenuDelegate: rebuild the engine list on open so custom slots and the
+  // active-provider checkmark stay current.
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    guard menu === engineMenu else { return }
+    menu.removeAllItems()
+    let prefs = Preferences.shared
+    let currentId = prefs.providerId
+    for preset in prefs.allProviders {
+      let item = menu.addItem(
+        withTitle: preset.label, action: #selector(selectEngine(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = preset.id
+      item.state = (preset.id == currentId) ? .on : .off
+    }
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
