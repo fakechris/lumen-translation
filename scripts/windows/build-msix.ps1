@@ -178,7 +178,7 @@ try {
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png"
-        uap:AppListEntry="default" />
+        AppListEntry="default" />
     </Application>
   </Applications>
 </Package>
