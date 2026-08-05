@@ -43,6 +43,11 @@ cp ../../packages/engines/src/provider-catalog.v1.json \
 # Copy the menu bar template icon.
 cp "${APP_NAME}/statusicon.png" "${RESOURCES_DIR}/statusicon.png"
 
+# Copy the app icon (Finder / Settings window / About). Source of truth is
+# AppIcon.svg (the Lumen Translation product icon); AppIcon.icns is generated
+# from it via tools + iconutil.
+cp "${APP_NAME}/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+
 # Info.plist
 cat > "${CONTENTS}/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -63,6 +68,10 @@ cat > "${CONTENTS}/Info.plist" <<'PLIST'
   <string>APPL</string>
   <key>CFBundleExecutable</key>
   <string>LumenTranslation</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>

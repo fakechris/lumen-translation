@@ -351,9 +351,10 @@ struct AboutTab: View {
 
   var body: some View {
     VStack(spacing: 16) {
-      Image(systemName: "character.bubble.fill")
-        .font(.system(size: 48))
-        .foregroundStyle(.terracotta)
+      Image(nsImage: NSApp.applicationIconImage)
+        .resizable()
+        .interpolation(.high)
+        .frame(width: 72, height: 72)
 
       Text("Lumen Translation")
         .font(.title2.bold())
