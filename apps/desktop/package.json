@@ -1,7 +1,7 @@
 {
   "name": "@lumen/desktop",
   "version": "0.1.0",
-  "description": "Lumen Translation desktop app (Windows): selection popup, translation window, and provider settings — the PopClip experience without PopClip.",
+  "description": "Lumen Translation desktop app (Windows): selection popup, translation window, and provider settings \u2014 the PopClip experience without PopClip.",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -26,10 +26,8 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0",
-    "@types/node": "^22.10.2",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.1",
-    "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
     "vite": "^6.0.7",
     "vitest": "^2.1.8"

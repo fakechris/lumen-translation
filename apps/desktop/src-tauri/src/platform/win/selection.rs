@@ -15,22 +15,22 @@
 //! reliable way to place a popup at the caret across every text stack, and a
 //! bar that lands in the wrong place is worse than no bar.
 
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
 use parking_lot::Mutex;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-    SetWindowsHookExW, TranslateMessage, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN,
+    CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage, HHOOK,
+    KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_LBUTTONDOWN,
     WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_SYSKEYDOWN,
 };
 
 use super::{clipboard, uia};
-use crate::platform::{Point, Rect, SelectionConfig, SelectionProbe, classify_probe};
+use crate::platform::{classify_probe, Point, Rect, SelectionConfig, SelectionProbe};
 
 /// `HC_ACTION`: the hook may process this event. Any other code means "pass it
 /// straight on".
@@ -123,8 +123,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                 if DRAG_ACTIVE.swap(false, Ordering::Relaxed) && !inside_bar {
                     let dx = at.x - DRAG_START_X.load(Ordering::Relaxed);
                     let dy = at.y - DRAG_START_Y.load(Ordering::Relaxed);
-                    let dragged =
-                        dx.abs() >= DRAG_THRESHOLD_PX || dy.abs() >= DRAG_THRESHOLD_PX;
+                    let dragged = dx.abs() >= DRAG_THRESHOLD_PX || dy.abs() >= DRAG_THRESHOLD_PX;
                     let seq = GESTURE_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
                     // Plain clicks are still probed: a double-click selects a
                     // word, and UI Automation reports that as a real selection.
@@ -203,14 +202,14 @@ fn hook_thread() {
                 return;
             }
         };
-        let keyboard: HHOOK =
-            match SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), None, 0) {
-                Ok(h) => h,
-                Err(err) => {
-                    log::error!("could not install the keyboard hook: {err}");
-                    return;
-                }
-            };
+        let keyboard: HHOOK = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), None, 0)
+        {
+            Ok(h) => h,
+            Err(err) => {
+                log::error!("could not install the keyboard hook: {err}");
+                return;
+            }
+        };
         log::debug!("selection hooks installed ({mouse:?}, {keyboard:?})");
 
         // Low-level hooks are only serviced while their thread pumps messages.

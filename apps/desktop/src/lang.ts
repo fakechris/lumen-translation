@@ -75,8 +75,10 @@ export function langLabel(code: string): string {
  * domestic endpoints; everything else uses the overseas ones.
  */
 export function autoDetectRegion(
-  locale: string = navigator.language,
-  timeZone: string = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  // Defaulted defensively rather than read straight off `navigator`: this runs
+  // under vitest's node environment too, where neither global is guaranteed.
+  locale: string = globalThis.navigator?.language ?? "en-US",
+  timeZone: string = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
 ): "cn" | "overseas" {
   const l = locale.toLowerCase().replace("_", "-");
   if (

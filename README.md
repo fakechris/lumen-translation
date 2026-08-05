@@ -231,6 +231,68 @@ Or download `Lumen.popclipextz` from the [latest release](https://github.com/fak
 
 Select text in any macOS app → click **Lumen** in the PopClip bar → the translation appears in the floating window. Switch engine / target language per selection from the PopClip extension's options, or manage everything from the app's **Settings**.
 
+### Windows desktop app
+
+Windows has no PopClip, so **Lumen Translation for Windows** (`apps/desktop`)
+does both jobs: it watches for text selections itself and shows the floating
+translation window. One install, no companion extension.
+
+Requirements: Windows 10 20H1 (build 19041) or later, x64. WebView2 is
+installed automatically if it's missing.
+
+**1. Install**
+
+Download `Lumen-Translation-<version>-windows-x64-setup.exe` from the [latest
+release](https://github.com/fakechris/lumen-translation/releases/latest) and
+run it. It installs per-user, so no administrator prompt.
+
+The installer isn't signed yet, so SmartScreen will warn on first run — click
+**More info** → **Run anyway**.
+
+Or build it yourself:
+
+```powershell
+pnpm install
+pnpm -r --filter "./packages/**" build      # engines expose types via ./dist
+pnpm --filter @lumen/desktop tauri build --bundles nsis
+```
+
+**2. Use it**
+
+Select text in any app → a small **Lumen** bar appears next to the cursor →
+click it. The translation opens in a floating window: **Copy**, **Speak**,
+**Esc** or **Ctrl+W** to dismiss.
+
+| Shortcut | Action |
+| --- | --- |
+| `Alt+Ctrl+T` | Translate the current selection without using the bar |
+| `Alt+Ctrl+L` | Re-open the last translation |
+
+Both are rebindable in **Preferences → Selection**.
+
+Right-click the tray icon for **Engine** (the same quick provider switch as the
+macOS menu bar) and **Preferences**, where API keys, models, endpoint region,
+languages, and custom OpenAI-compatible endpoints live.
+
+**How it reads your selection**
+
+Lumen asks Windows' accessibility layer (UI Automation) for the selected text.
+That path touches nothing else — no clipboard, no synthetic keystrokes — and
+works in most apps, including Chromium and Electron ones.
+
+Some apps expose no accessible text. There, Lumen falls back to pressing
+Ctrl+C for you and restoring whatever was on the clipboard afterwards. That
+fallback only restores *text*, so if you had an image or files copied, they are
+lost. Turn it off in **Preferences → Selection** to keep the clipboard strictly
+untouched, at the cost of the bar not appearing in those apps.
+
+Password fields are never read and never offered. API keys are encrypted at
+rest with DPAPI, tied to your Windows account.
+
+See [`docs/WINDOWS_PORT_STATUS.md`](docs/WINDOWS_PORT_STATUS.md) for the full
+list of what is implemented, what is deliberately out of scope, and what still
+needs on-device verification.
+
 ### Mobile (iOS / Android)
 
 A Capacitor shell (`apps/mobile`) reuses `@lumen/core` + `@lumen/engines`.
@@ -274,6 +336,7 @@ apps/
   userscript/    @lumen/userscript Tampermonkey/Violentmonkey build
   popclip/       @lumen/popclip    macOS PopClip extension (esbuild IIFE)
   popclip-window/ LumenTranslation macOS menu-bar companion app (Swift/AppKit floating window)
+  desktop/       @lumen/desktop    Windows tray app (Tauri v2) — selection watcher + translation window
   worker/        @lumen/worker     Cloudflare Workers sync backend (Hono + KV)
   mobile/        @lumen/mobile     Capacitor shell (Vite + React)
 
@@ -295,10 +358,20 @@ adapter view of that JSON (OpenAI-compatible chat providers), including per-prov
 
 - To pull the latest catalog: `pnpm sync:provider-catalog` (never hand-edit the vendored JSON).
 - Contract-conformance tests live in `packages/engines/src/__tests__/provider-catalog.test.ts`.
-- Known remaining copy: the Swift macOS companion app (`apps/popclip-window`,
-  `LumenTranslation/Preferences.swift`) still hardcodes its own provider shortlist — it is the
-  last un-migrated consumer and should eventually load the same vendored JSON as a bundle
-  resource.
+
+Three hosts read the catalog, each with its own UI policy over the same data:
+
+| Host | How it reads the catalog | Curated list |
+| --- | --- | --- |
+| Extension / userscript | `PROVIDER_CATALOG` from `@lumen/engines` | OpenAI-compatible chat, minus `openai` |
+| Windows desktop | `PROVIDER_CATALOG_SOURCE` from `@lumen/engines`, adapted in `apps/desktop/src/catalog.ts` | The curated eight, plus both free MT engines |
+| macOS companion | The same JSON, copied into the app bundle by `build.sh` and decoded by `LumenTranslation/ProviderCatalog.swift` | The curated eight, plus both free MT engines |
+
+The Swift decoder is the one remaining second implementation. It reads the same
+vendored file rather than hardcoding provider data, but its curated-list and
+alias logic is duplicated from `apps/desktop/src/catalog.ts`; the two are kept
+in step by the tests in `apps/desktop/src/__tests__/catalog.test.ts` and
+`apps/popclip-window/tests/main.swift`.
 
 ---
 
@@ -319,6 +392,32 @@ bash apps/popclip-window/build.sh         # macOS companion app (needs macOS + s
 ```
 
 The macOS companion app (`apps/popclip-window`) is a Swift/AppKit target built with `swiftc`, not part of the pnpm graph, so build it separately with the script above (macOS 13+, Apple Silicon).
+
+### Windows desktop app
+
+`apps/desktop` is a Tauri v2 app: a Vite/React frontend in the pnpm graph plus
+a Rust backend under `src-tauri`. Needs Rust stable and, for a full build,
+Windows with the Windows 10/11 SDK.
+
+```bash
+pnpm --filter @lumen/desktop typecheck
+pnpm --filter @lumen/desktop test              # catalog, settings, fallback chain
+pnpm --filter @lumen/desktop tauri dev         # Windows only
+pnpm --filter @lumen/desktop tauri build --bundles nsis
+node tools/gen-windows-icons.mjs               # regenerate icons from AppIcon.svg
+```
+
+The Rust side builds on macOS and Linux too — the Windows-only modules (input
+hooks, UI Automation, DPAPI, clipboard) have fail-closed stubs — so
+`cargo test`, `cargo clippy` and `cargo fmt` all work from any workstation:
+
+```bash
+cd apps/desktop/src-tauri && cargo test && cargo clippy --all-targets
+```
+
+The Windows-only code paths are compiled for real by `ci-windows.yml`, which
+also produces the NSIS installer and the Microsoft Store MSIX
+(`scripts/windows/build-msix.ps1`).
 
 Releasing: push a `v*` tag. The `release.yml` workflow builds every artifact and attaches them to a GitHub Release.
 

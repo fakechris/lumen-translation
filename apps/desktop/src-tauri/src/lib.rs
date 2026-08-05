@@ -25,12 +25,14 @@ use std::path::PathBuf;
 
 use parking_lot::{Mutex, RwLock};
 use tauri::tray::{TrayIconBuilder, TrayIconId};
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
+};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use platform::selection::SelectionEvent;
-use platform::{Point, Rect, SelectionConfig, selection, window_ext};
+use platform::{selection, window_ext, Point, Rect, SelectionConfig};
 use settings::Settings;
 use tray::Engine;
 
@@ -197,8 +199,12 @@ fn show_translation(app: &AppHandle, text: &str) -> Result<(), String> {
     let Some(window) = app.get_webview_window(WINDOW_TRANSLATE) else {
         return Ok(());
     };
-    app.emit_to(WINDOW_TRANSLATE, "translate-text", serde_json::json!({ "text": text }))
-        .map_err(|e| e.to_string())?;
+    app.emit_to(
+        WINDOW_TRANSLATE,
+        "translate-text",
+        serde_json::json!({ "text": text }),
+    )
+    .map_err(|e| e.to_string())?;
     window.show().map_err(|e| e.to_string())?;
     window.set_focus().map_err(|e| e.to_string())
 }

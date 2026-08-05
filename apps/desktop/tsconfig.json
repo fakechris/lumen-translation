@@ -1,8 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["vite/client", "node"],
-    "noEmit": true
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "types": ["vite/client"]
   },
-  "include": ["src", "scripts", "vite.config.ts"]
+  "include": ["src"]
 }

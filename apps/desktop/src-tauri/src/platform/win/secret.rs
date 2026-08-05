@@ -6,9 +6,9 @@
 //! This is the same protection level the browser password stores use, and it
 //! needs no user-visible key management.
 
-use windows::Win32::Foundation::{HLOCAL, LocalFree};
+use windows::Win32::Foundation::{LocalFree, HLOCAL};
 use windows::Win32::Security::Cryptography::{
-    CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData,
+    CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB,
 };
 
 /// Description recorded inside the blob; shows up in DPAPI audit tooling.

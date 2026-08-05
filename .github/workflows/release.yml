@@ -96,6 +96,7 @@ jobs:
             echo "- \`lumen.user.js\` — Tampermonkey/Violentmonkey userscript"
             echo "- \`Lumen.popclipext\` / \`Lumen.popclipextz\` — macOS PopClip extension (double-click .popclipext to install)"
             echo "- \`LumenTranslation.app.zip\` — macOS menu-bar companion app (Apple Silicon; pairs with the PopClip extension)"
+            echo "- \`Lumen-Translation-$TAG-windows-x64-setup.exe\` — Windows tray app (per-user install, no PopClip needed)"
             echo "- \`lumen-mobile-web.tar.gz\` — Capacitor mobile web bundle (run \`cap add ios/android\` then \`cap sync\`)"
             echo ""
             echo "## Quick start"
@@ -143,4 +144,51 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: apps/popclip-window/dist/LumenTranslation.app.zip
+          fail_on_unmatched_files: true
+
+  windows-app:
+    name: Build Windows desktop app
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # @lumen/engines exposes types only via ./dist.
+      - name: Build library packages
+        run: pnpm -r --filter "./packages/**" build
+
+      - name: Build NSIS installer
+        run: pnpm --filter "@lumen/desktop" tauri build --bundles nsis
+
+      # Named here rather than by globbing at upload time so a stale bundle
+      # from a cached target directory can't be published under this tag.
+      - name: Name the release asset
+        shell: pwsh
+        env:
+          VERSION_TAG: ${{ github.ref_name }}
+        run: |
+          ./scripts/windows/collect-release-asset.ps1 `
+            -BundleDirectory apps/desktop/src-tauri/target/release/bundle/nsis `
+            -VersionTag $env:VERSION_TAG `
+            -OutputDirectory release-assets
+
+      - name: Attach installer to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*-setup.exe
           fail_on_unmatched_files: true

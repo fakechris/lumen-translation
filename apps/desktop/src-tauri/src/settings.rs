@@ -242,7 +242,9 @@ mod tests {
             target_lang: "ja".into(),
             ..Default::default()
         };
-        settings.api_keys.insert("deepseek".into(), "sk-secret".into());
+        settings
+            .api_keys
+            .insert("deepseek".into(), "sk-secret".into());
         settings.custom_providers.push(CustomProvider {
             id: "custom:abc".into(),
             name: "Local".into(),

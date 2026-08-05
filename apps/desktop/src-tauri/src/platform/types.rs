@@ -146,7 +146,10 @@ mod tests {
             Some(Some("hello".into()))
         );
         // Double-click: no drag, but a real selection.
-        assert_eq!(classify_probe(probe, false, CFG), Some(Some("hello".into())));
+        assert_eq!(
+            classify_probe(probe, false, CFG),
+            Some(Some("hello".into()))
+        );
     }
 
     #[test]
@@ -192,7 +195,10 @@ mod tests {
 
     #[test]
     fn a_drag_raises_a_speculative_bar_only_with_the_clipboard_fallback() {
-        assert_eq!(classify_probe(SelectionProbe::Likely, true, CFG), Some(None));
+        assert_eq!(
+            classify_probe(SelectionProbe::Likely, true, CFG),
+            Some(None)
+        );
         let no_fallback = SelectionConfig {
             clipboard_fallback: false,
             ..CFG
