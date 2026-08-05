@@ -32,9 +32,12 @@ enum LumenTranslationMain {
   }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
   private var reopenHotKey: GlobalHotKey?
+  // Rebuilt each time it opens, so newly added custom slots appear and the
+  // active provider stays checkmarked.
+  private let engineMenu = NSMenu(title: "Engine")
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     ProcessInfo.processInfo.disableAutomaticTermination("lumen-popclip-window")
@@ -59,6 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     reopenItem.keyEquivalentModifierMask = [.command, .option]
     reopenItem.target = self
     menu.addItem(NSMenuItem.separator())
+    // Quick engine switch: pick the active provider without opening Settings.
+    let engineItem = menu.addItem(withTitle: "Engine", action: nil, keyEquivalent: "")
+    engineMenu.delegate = self
+    engineItem.submenu = engineMenu
+    menu.addItem(NSMenuItem.separator())
     let prefsItem = menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
     prefsItem.target = self
     menu.addItem(NSMenuItem.separator())
@@ -80,6 +88,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc private func openPreferences() {
     PreferencesWindowController.show()
+  }
+
+  @objc private func selectEngine(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String else { return }
+    Preferences.shared.providerId = id
+  }
+
+  // NSMenuDelegate: rebuild the engine list on open so custom slots and the
+  // active-provider checkmark stay current.
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    guard menu === engineMenu else { return }
+    menu.removeAllItems()
+    let prefs = Preferences.shared
+    let currentId = prefs.providerId
+    for preset in prefs.allProviders {
+      let item = menu.addItem(
+        withTitle: preset.label, action: #selector(selectEngine(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = preset.id
+      item.state = (preset.id == currentId) ? .on : .off
+    }
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -139,10 +168,15 @@ final class ConfigureCommand: NSScriptCommand {
     if let v = dict["engine"] as? String, !v.isEmpty {
       prefs.providerId = v
     }
-    if let v = dict["apiKey"] as? String, !v.isEmpty, let pid = dict["engine"] as? String {
+    // Only bind a key/model to a provider when PopClip actually names one.
+    // With engine defaulting to "" ("App Setting"), the app's own per-provider
+    // config stays authoritative and we avoid an orphaned "lumen.apiKey." write.
+    if let v = dict["apiKey"] as? String, !v.isEmpty,
+       let pid = dict["engine"] as? String, !pid.isEmpty {
       prefs.setApiKey(v, for: pid)
     }
-    if let v = dict["model"] as? String, !v.isEmpty, let pid = dict["engine"] as? String {
+    if let v = dict["model"] as? String, !v.isEmpty,
+       let pid = dict["engine"] as? String, !pid.isEmpty {
       prefs.setModel(v, for: pid)
     }
     if let v = dict["region"] as? String, !v.isEmpty {

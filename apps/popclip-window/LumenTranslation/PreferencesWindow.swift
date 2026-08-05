@@ -40,17 +40,23 @@ struct PreferencesView: View {
           }
           .tag(0)
 
+        CustomEndpointsTab()
+          .tabItem {
+            Label("Custom", systemImage: "square.stack.3d.up")
+          }
+          .tag(1)
+
         GeneralTab()
           .tabItem {
             Label("General", systemImage: "gearshape")
           }
-          .tag(1)
+          .tag(2)
 
         AboutTab()
           .tabItem {
             Label("About", systemImage: "info.circle")
           }
-          .tag(2)
+          .tag(3)
       }
       .padding(20)
     }
@@ -73,14 +79,14 @@ struct ProviderTab: View {
   }
 
   var currentPreset: ProviderPreset {
-    Providers.find(providerId) ?? Providers.catalog[0]
+    Preferences.shared.allProviders.first(where: { $0.id == providerId }) ?? Providers.catalog[0]
   }
 
   var body: some View {
     Form {
       Section {
         Picker("Provider", selection: $providerId) {
-          ForEach(Providers.catalog) { p in
+          ForEach(Preferences.shared.allProviders) { p in
             Text(p.label).tag(p.id)
           }
         }
@@ -202,6 +208,83 @@ struct ProviderTab: View {
   }
 }
 
+// MARK: - Custom endpoints tab
+
+struct CustomEndpointsTab: View {
+  @State private var customs: [CustomProvider] = Preferences.shared.customProviders
+  // id -> API key, mirrored into the shared per-id key storage on edit.
+  @State private var keys: [String: String] = [:]
+
+  var body: some View {
+    Form {
+      Section {
+        Text("Add OpenAI-compatible endpoints. Each slot keeps its own base URL, model, and API key, and shows up in the provider list and the menu-bar Engine switcher.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      ForEach($customs) { $c in
+        Section(c.name.isEmpty ? "Untitled" : c.name) {
+          TextField("Name", text: $c.name)
+            .onChange(of: c.name) { _ in persist() }
+          TextField("Base URL (e.g. https://api.example.com/v1)", text: $c.baseURL)
+            .onChange(of: c.baseURL) { _ in persist() }
+            .textFieldStyle(.roundedBorder)
+          TextField("Model", text: $c.model)
+            .onChange(of: c.model) { _ in persist() }
+
+          SecureField("API Key", text: Binding(
+            get: { keys[c.id] ?? "" },
+            set: { newValue in
+              keys[c.id] = newValue
+              Preferences.shared.setApiKey(newValue, for: c.id)
+            }))
+
+          Button(role: .destructive) {
+            remove(c)
+          } label: {
+            Label("Delete slot", systemImage: "trash")
+          }
+        }
+      }
+
+      Section {
+        Button {
+          add()
+        } label: {
+          Label("Add custom endpoint", systemImage: "plus.circle")
+        }
+      }
+    }
+    .formStyle(.grouped)
+    .onAppear(perform: reload)
+  }
+
+  private func reload() {
+    customs = Preferences.shared.customProviders
+    var loaded: [String: String] = [:]
+    for c in customs { loaded[c.id] = Preferences.shared.apiKey(for: c.id) }
+    keys = loaded
+  }
+
+  private func persist() {
+    Preferences.shared.customProviders = customs
+  }
+
+  private func add() {
+    let slot = CustomProvider.make()
+    customs.append(slot)
+    keys[slot.id] = ""
+    Preferences.shared.customProviders = customs
+  }
+
+  private func remove(_ c: CustomProvider) {
+    customs.removeAll { $0.id == c.id }
+    keys[c.id] = nil
+    Preferences.shared.removeCustomProvider(id: c.id)
+  }
+}
+
 // MARK: - General tab
 
 struct GeneralTab: View {
@@ -210,7 +293,8 @@ struct GeneralTab: View {
   @State private var sourceLang: String = Preferences.shared.sourceLang
 
   var currentPreset: ProviderPreset {
-    Providers.find(Preferences.shared.providerId) ?? Providers.catalog[0]
+    let id = Preferences.shared.providerId
+    return Preferences.shared.allProviders.first(where: { $0.id == id }) ?? Providers.catalog[0]
   }
 
   var body: some View {
