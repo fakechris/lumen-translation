@@ -231,8 +231,18 @@ mod tests {
     // These go through `try_write_text` rather than `write_text` so a refusal
     // reports the Win32 error instead of an unhelpful `assertion failed`.
 
+    /// The clipboard is one global resource, and `cargo test` runs these two on
+    /// separate threads. Left to race they intermittently fail — an
+    /// `OpenClipboard(NULL)` does not lock out another thread of the same
+    /// process, so whichever calls `CloseClipboard` first leaves the other's
+    /// `SetClipboardData` with no open clipboard. The app itself only ever
+    /// touches the clipboard from the one hook thread, so this is a
+    /// constraint on the tests, not on the code under test.
+    static CLIPBOARD: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
     #[test]
     fn text_round_trips_through_the_clipboard() {
+        let _serialised = CLIPBOARD.lock();
         // Unicode beyond the BMP exercises the UTF-16 surrogate path.
         let sample = "翻訳 test 🌤";
         try_write_text(sample).expect("write to the clipboard");
@@ -241,6 +251,7 @@ mod tests {
 
     #[test]
     fn sequence_number_advances_on_write() {
+        let _serialised = CLIPBOARD.lock();
         let before = sequence_number();
         try_write_text("lumen sequence probe").expect("write to the clipboard");
         assert_ne!(sequence_number(), before);
