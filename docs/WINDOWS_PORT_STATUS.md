@@ -140,44 +140,72 @@ Done on a macOS workstation:
   window clamping, selection-classification policy).
 - `cargo clippy --all-targets` — clean.
 - `cargo fmt --all --check` — clean.
-- `cargo check` and `cargo clippy` for `x86_64-pc-windows-msvc` over the
-  Windows-only modules (hooks, UI Automation, DPAPI, clipboard, window
-  helpers), which is the code a non-Windows host would otherwise never
-  compile. The Tauri glue could not be cross-checked because `tauri-build`
-  runs a Windows resource compiler that is not available off-Windows.
+- `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings`,
+  which type-checks the *whole* crate — including the Tauri glue in `lib.rs`
+  and `tray.rs` — for Windows without a Windows machine. `tauri-build` needs a
+  resource compiler, and mingw-w64's `windres` (`brew install mingw-w64`) is
+  one; only the MSVC target lacks it. This is the cheapest way to catch a
+  Windows-only compile error, and it caught every one CI later confirmed.
+- `cargo clippy --target x86_64-pc-windows-msvc` over the Windows-only modules
+  (hooks, UI Automation, DPAPI, clipboard, window helpers) via a scratch crate
+  that symlinks `src/platform` and `src/settings.rs`. Note that the scratch
+  crate must declare those as **private** modules, as the real crate does:
+  behind `pub mod` an unused `pub use` is not a warning, and one such
+  re-export is exactly what the first Windows CI run failed on.
 - `pnpm --filter @lumen/desktop typecheck` — clean.
 - `pnpm --filter @lumen/desktop test` — 47 passing (catalog, settings,
   fallback chain).
 - `pnpm --filter @lumen/desktop build` — clean.
 
-### Pending on a Windows machine
+### Done on the Windows CI runner
 
-Nothing below has run on real hardware yet. `ci-windows.yml` covers items 1–4
-automatically; the rest need a person.
+`ci-windows.yml` is green on `windows-latest`:
 
-1. `cargo clippy --all-targets -- -D warnings` in `apps/desktop/src-tauri`
-   (first real compile of the Tauri glue and the tray/hotkey code).
-2. `cargo test` in `apps/desktop/src-tauri` — the DPAPI and Win32 clipboard
-   tests only execute here.
-3. `pnpm --filter @lumen/desktop tauri build --bundles nsis`.
-4. `scripts/windows/build-msix.ps1` passes MakeAppx validation.
-5. Install from the NSIS installer and confirm the app starts to the tray.
-6. Action bar behaviour by app family: Notepad and RichEdit (Win32), Settings
+- `cargo clippy --all-targets -- -D warnings` — the first real compile of the
+  Tauri glue, the tray, and the hotkey code.
+- `cargo test` — 22 passing, including the DPAPI and Win32 clipboard tests that
+  only execute on Windows.
+- `pnpm --filter @lumen/desktop tauri build --bundles nsis` produces
+  `Lumen Translation_0.1.0_x64-setup.exe`.
+- `scripts/windows/build-msix.ps1` passes MakeAppx validation.
+
+Three things failed the first time it ran:
+
+- **An unused `pub use platform::clipboard`.** Invisible on a macOS host,
+  where `platform/mod.rs` carries `allow(unused_imports)` so the fail-closed
+  stubs don't warn on every dev build.
+- **`sequence_number_advances_on_write` failing intermittently.** The two
+  clipboard tests drove one global resource from separate harness threads;
+  `OpenClipboard(NULL)` does not lock out another thread of the same process,
+  so one test's `CloseClipboard` left the other's `SetClipboardData` with no
+  open clipboard. They are serialised now. The app only ever touches the
+  clipboard from its single hook thread.
+- **`uap:AppListEntry` in the MSIX manifest.** The attribute is declared
+  unqualified in the uap schema, so the prefix put it in a namespace the
+  schema does not define.
+
+### Still pending on real hardware
+
+Nothing below can be checked from CI — a headless runner has no user session
+to select text in, and the artefacts are never installed.
+
+1. Install from the NSIS installer and confirm the app starts to the tray.
+2. Action bar behaviour by app family: Notepad and RichEdit (Win32), Settings
    and Mail (WinUI/UWP), Chrome and Edge (Chromium), VS Code and Slack
    (Electron), Word and Outlook (Office), Firefox (its own a11y stack), and a
    PDF viewer.
-7. Confirm the bar never appears over a password field, in Windows Hello
+3. Confirm the bar never appears over a password field, in Windows Hello
    prompts, or on the UAC secure desktop.
-8. Confirm the clipboard is restored after a fallback copy, and that clipboard
+4. Confirm the clipboard is restored after a fallback copy, and that clipboard
    history (Win+V) does not fill with Lumen entries.
-9. Multi-monitor and mixed-DPI placement: bar and translation window must land
+5. Multi-monitor and mixed-DPI placement: bar and translation window must land
    on the monitor the selection was made on, at the right scale.
-10. Confirm the hooks survive a session lock/unlock and a display topology
-    change, and that Windows has not evicted them after prolonged use.
-11. Confirm `Alt+Ctrl+T` and `Alt+Ctrl+L` register, and that a conflict with
-    another app degrades to a warning rather than a crash.
-12. Launch-at-login toggles the registry Run entry and the app starts hidden.
-13. Second-launch behaviour: the single-instance plugin surfaces Preferences
-    instead of installing a second set of hooks.
+6. Confirm the hooks survive a session lock/unlock and a display topology
+   change, and that Windows has not evicted them after prolonged use.
+7. Confirm `Alt+Ctrl+T` and `Alt+Ctrl+L` register, and that a conflict with
+   another app degrades to a warning rather than a crash.
+8. Launch-at-login toggles the registry Run entry and the app starts hidden.
+9. Second-launch behaviour: the single-instance plugin surfaces Preferences
+   instead of installing a second set of hooks.
 
 Record failures here as they are found.
