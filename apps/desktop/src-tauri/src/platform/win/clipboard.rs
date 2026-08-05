@@ -39,16 +39,22 @@ struct ClipboardGuard;
 
 impl ClipboardGuard {
     fn open() -> Option<Self> {
+        Self::try_open().ok()
+    }
+
+    fn try_open() -> windows::core::Result<Self> {
+        let mut last = None;
         for _ in 0..OPEN_ATTEMPTS {
             // SAFETY: passing no owner window is valid and ties the clipboard
             // to the current task.
-            if unsafe { OpenClipboard(None) }.is_ok() {
-                return Some(Self);
+            match unsafe { OpenClipboard(None) } {
+                Ok(()) => return Ok(Self),
+                Err(err) => last = Some(err),
             }
             sleep(OPEN_RETRY_DELAY);
         }
         log::warn!("clipboard is owned by another process; giving up");
-        None
+        Err(last.unwrap_or_else(windows::core::Error::from_win32))
     }
 }
 
@@ -83,31 +89,41 @@ pub fn read_text() -> Option<String> {
 
 /// Replace the clipboard with `text`, discarding any other formats.
 pub fn write_text(text: &str) -> bool {
+    match try_write_text(text) {
+        Ok(()) => true,
+        Err(err) => {
+            log::warn!("could not write to the clipboard: {err}");
+            false
+        }
+    }
+}
+
+/// The body of [`write_text`], keeping the Win32 error that failed it.
+///
+/// A bare `false` is not enough to act on: contention with another process,
+/// a refused allocation, and a clipboard we don't own all look identical from
+/// the outside and want different responses. The callers that only need
+/// "did it work" go through [`write_text`].
+fn try_write_text(text: &str) -> windows::core::Result<()> {
     let mut utf16: Vec<u16> = text.encode_utf16().collect();
     utf16.push(0);
     let bytes = std::mem::size_of_val(utf16.as_slice());
 
-    let _guard = match ClipboardGuard::open() {
-        Some(g) => g,
-        None => return false,
-    };
+    let _guard = ClipboardGuard::try_open()?;
     unsafe {
-        if EmptyClipboard().is_err() {
-            return false;
-        }
-        let Ok(global) = GlobalAlloc(GMEM_MOVEABLE, bytes) else {
-            return false;
-        };
+        EmptyClipboard()?;
+        let global = GlobalAlloc(GMEM_MOVEABLE, bytes)?;
         let dst = GlobalLock(global) as *mut u16;
         if dst.is_null() {
-            return false;
+            return Err(windows::core::Error::from_win32());
         }
         std::ptr::copy_nonoverlapping(utf16.as_ptr(), dst, utf16.len());
         let _ = GlobalUnlock(global);
         // On success the clipboard owns the allocation, so it must not be
         // freed here.
-        SetClipboardData(CF_UNICODETEXT, Some(HANDLE(global.0))).is_ok()
+        SetClipboardData(CF_UNICODETEXT, Some(HANDLE(global.0)))?;
     }
+    Ok(())
 }
 
 /// Monotonic counter bumped by Windows on every clipboard change. Comparing it
@@ -212,18 +228,21 @@ fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
 mod tests {
     use super::*;
 
+    // These go through `try_write_text` rather than `write_text` so a refusal
+    // reports the Win32 error instead of an unhelpful `assertion failed`.
+
     #[test]
     fn text_round_trips_through_the_clipboard() {
         // Unicode beyond the BMP exercises the UTF-16 surrogate path.
         let sample = "翻訳 test 🌤";
-        assert!(write_text(sample));
+        try_write_text(sample).expect("write to the clipboard");
         assert_eq!(read_text().as_deref(), Some(sample));
     }
 
     #[test]
     fn sequence_number_advances_on_write() {
         let before = sequence_number();
-        assert!(write_text("lumen sequence probe"));
+        try_write_text("lumen sequence probe").expect("write to the clipboard");
         assert_ne!(sequence_number(), before);
     }
 }
