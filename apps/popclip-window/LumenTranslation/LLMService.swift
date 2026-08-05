@@ -1,6 +1,12 @@
 // Translation service: routes to either Google's free endpoint or an
 // OpenAI-compatible chat-completions provider based on user preferences.
 //
+// Fallback chain: the user's selected provider is tried first; on any failure
+// (e.g. Google's HTTP 429 CAPTCHA rate-limit) it falls back to the free MT
+// engines (Microsoft, then Google) and finally to any configured LLM that has
+// an API key set. The first provider that succeeds wins, and its label is
+// reported back so the window shows which engine produced the result.
+//
 // PopClip action -> TranslateCommand -> TranslationService.translate(...).
 
 import Foundation
@@ -13,14 +19,19 @@ enum TranslationError: Error, CustomStringConvertible {
   var description: String {
     switch self {
     case .badRequest(let m): return "badRequest: \(m)"
-    case .http(let code, let body): return "HTTP \(code): \(body)"
+    case .http(let code, let body):
+      // Error bodies can be large (e.g. Google's HTML CAPTCHA page on 429);
+      // keep the message readable.
+      let snippet = body.replacingOccurrences(of: "\n", with: " ")
+        .trimmingCharacters(in: .whitespaces)
+      return "HTTP \(code): \(snippet.prefix(200))"
     case .parse(let m): return "parse error: \(m)"
     }
   }
 }
 
 enum TranslationOutcome {
-  case success(String)
+  case success(String, engine: String)
   case failure(String)
 }
 
@@ -93,15 +104,68 @@ final class TranslationService {
 
   func translate(text: String, completion: @escaping (TranslationOutcome) -> Void) {
     let prefs = Preferences.shared
-    let preset = prefs.provider
-    // Route on the catalog `api_style`: the two free MT engines have
-    // dedicated wire formats; everything else is OpenAI-compatible chat.
+    let chain = fallbackChain(prefs: prefs)
+    attempt(chain: chain, index: 0, text: text, prefs: prefs,
+            lastError: "no translation provider available", completion: completion)
+  }
+
+  /// Ordered list of providers to try. The user's selection comes first, then
+  /// the free keyless MT engines (Microsoft, Google), then any configured LLM
+  /// (an `openai_compat` provider with an API key set). Duplicates and
+  /// key-needing providers without a key are skipped.
+  private func fallbackChain(prefs: Preferences) -> [ProviderPreset] {
+    var chain: [ProviderPreset] = []
+    var seen = Set<String>()
+    func add(_ preset: ProviderPreset?) {
+      guard let preset = preset, !seen.contains(preset.id) else { return }
+      if preset.needsKey && prefs.apiKey(for: preset.id).isEmpty { return }
+      chain.append(preset)
+      seen.insert(preset.id)
+    }
+    add(prefs.provider)
+    add(Providers.find("microsoft_translator"))
+    add(Providers.find("google_translate"))
+    for preset in Providers.catalog where preset.apiStyle == "openai_compat" {
+      add(preset)
+    }
+    return chain
+  }
+
+  /// Try providers in order, moving to the next on any failure and reporting
+  /// the last error if all of them fail.
+  private func attempt(chain: [ProviderPreset], index: Int, text: String,
+                       prefs: Preferences, lastError: String,
+                       completion: @escaping (TranslationOutcome) -> Void) {
+    guard index < chain.count else {
+      completion(.failure(lastError))
+      return
+    }
+    let preset = chain[index]
+    attemptOne(preset: preset, text: text, prefs: prefs) { [weak self] outcome in
+      switch outcome {
+      case .success(let t, let engine):
+        completion(.success(t, engine: engine))
+      case .failure(let e):
+        let combined = "\(preset.label): \(e)"
+        if index + 1 < chain.count {
+          NSLog("[LumenTranslation] \(preset.id) failed (\(e)); falling back to \(chain[index + 1].id)")
+        }
+        self?.attempt(chain: chain, index: index + 1, text: text, prefs: prefs,
+                      lastError: combined, completion: completion)
+      }
+    }
+  }
+
+  /// Route a single provider to its wire format. The two free MT engines have
+  /// dedicated formats; everything else is OpenAI-compatible chat.
+  private func attemptOne(preset: ProviderPreset, text: String, prefs: Preferences,
+                          completion: @escaping (TranslationOutcome) -> Void) {
     switch preset.apiStyle {
     case "google_translate":
-      googleTranslate(endpoint: prefs.endpoint(for: preset), text: text,
+      googleTranslate(endpoint: prefs.endpoint(for: preset), label: preset.label, text: text,
                       source: prefs.sourceLang, target: prefs.targetLang, completion: completion)
     case "microsoft_translator":
-      microsoftTranslate(endpoint: prefs.endpoint(for: preset), text: text,
+      microsoftTranslate(endpoint: prefs.endpoint(for: preset), label: preset.label, text: text,
                          source: prefs.sourceLang, target: prefs.targetLang, completion: completion)
     default:
       openAICompatibleTranslate(
@@ -118,7 +182,7 @@ final class TranslationService {
 
   // MARK: - Google free endpoint
 
-  private func googleTranslate(endpoint: String, text: String, source: String, target: String,
+  private func googleTranslate(endpoint: String, label: String, text: String, source: String, target: String,
                                completion: @escaping (TranslationOutcome) -> Void) {
     guard var comps = URLComponents(string: endpoint) else {
       completion(.failure("google: bad endpoint \(endpoint)"))
@@ -140,7 +204,11 @@ final class TranslationService {
           return
         }
         let out = sentences.compactMap { $0.first as? String }.joined()
-        completion(.success(out))
+        if out.isEmpty {
+          completion(.failure("google: empty response"))
+        } else {
+          completion(.success(out, engine: label))
+        }
       case .failure(let e):
         completion(.failure(e.description))
       }
@@ -149,7 +217,7 @@ final class TranslationService {
 
   // MARK: - Microsoft free endpoint (no key required)
 
-  private func microsoftTranslate(endpoint: String, text: String, source: String, target: String,
+  private func microsoftTranslate(endpoint: String, label: String, text: String, source: String, target: String,
                                   completion: @escaping (TranslationOutcome) -> Void) {
     let sl = source == "auto" ? "" : "&from=\(source)"
     let urlStr = "\(endpoint)?api-version=3.0\(sl)&to=\(target)"
@@ -171,7 +239,7 @@ final class TranslationService {
           if out.isEmpty {
             completion(.failure("microsoft: empty response"))
           } else {
-            completion(.success(out))
+            completion(.success(out, engine: label))
           }
         } catch {
           completion(.failure("microsoft: \(error.localizedDescription)"))
@@ -249,19 +317,21 @@ final class TranslationService {
         do {
           let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
           if let err = json["error"] as? [String: Any], let msg = err["message"] as? String {
-            completion(.failure("\(preset.label): \(msg)"))
+            // The fallback driver (`attempt`) prefixes the provider label, so
+            // provider-internal messages stay label-free to avoid duplication.
+            completion(.failure(msg))
             return
           }
           let choices = json["choices"] as? [[String: Any]] ?? []
           let content = (choices.first?["message"] as? [String: Any])?["content"] as? String ?? ""
           let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
           if trimmed.isEmpty {
-            completion(.failure("\(preset.label): empty response"))
+            completion(.failure("empty response"))
           } else {
-            completion(.success(trimmed))
+            completion(.success(trimmed, engine: preset.label))
           }
         } catch {
-          completion(.failure("\(preset.label): \(error.localizedDescription)"))
+          completion(.failure(error.localizedDescription))
         }
       case .failure(let e):
         completion(.failure(e.description))

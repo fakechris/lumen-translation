@@ -98,19 +98,19 @@ final class TranslateCommand: NSScriptCommand {
     var resultTranslation = ""
     var resultEngine = ""
     let prefs = Preferences.shared
-    let providerLabel = prefs.provider.label
     TranslationService.shared.translate(text: text) { outcome in
       switch outcome {
-      case .success(let t):
+      case .success(let t, let engine):
         resultTranslation = t
-        resultEngine = providerLabel
+        resultEngine = engine
       case .failure(let e):
         resultTranslation = "Lumen error: \(e)"
         resultEngine = "error"
       }
       sem.signal()
     }
-    _ = sem.wait(timeout: .now() + 30)
+    // Allow enough time for the fallback chain (primary + free MT + LLM).
+    _ = sem.wait(timeout: .now() + 60)
     let payload = TranslationPayload(
       source: text, translation: resultTranslation,
       engine: resultEngine,
