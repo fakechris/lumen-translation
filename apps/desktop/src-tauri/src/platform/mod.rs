@@ -23,4 +23,6 @@ mod imp;
 #[path = "stub.rs"]
 mod imp;
 
-pub use imp::{clipboard, secret, selection, window_ext};
+// `clipboard` is deliberately not re-exported: it is how `selection` implements
+// its Ctrl+C fallback, not something the app above this layer should reach for.
+pub use imp::{secret, selection, window_ext};
