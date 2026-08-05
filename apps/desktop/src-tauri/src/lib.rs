@@ -81,25 +81,53 @@ fn get_settings(state: tauri::State<'_, AppState>) -> Settings {
 #[tauri::command]
 fn save_settings(
     app: AppHandle,
+    window: tauri::Window,
     state: tauri::State<'_, AppState>,
     settings: Settings,
 ) -> Result<(), String> {
+    apply_settings(&app, &state, settings, Some(window.label().to_string()))
+}
+
+/// Persist `settings`, react to whatever changed, and tell the other windows.
+///
+/// `origin` is the label of the window that made the change, if any. It is
+/// excluded from the broadcast: Preferences writes through on every keystroke,
+/// so echoing the settings back would drive its controlled inputs from a
+/// round trip and drop characters typed while one was in flight.
+fn apply_settings(
+    app: &AppHandle,
+    state: &AppState,
+    settings: Settings,
+    origin: Option<String>,
+) -> Result<(), String> {
     let previous = state.settings.read().clone();
+    if previous == settings {
+        return Ok(());
+    }
     settings::save(&state.settings_path, &settings).map_err(|e| e.to_string())?;
     *state.settings.write() = settings.clone();
 
     if previous.hotkey_show_last != settings.hotkey_show_last
         || previous.hotkey_translate_selection != settings.hotkey_translate_selection
     {
-        register_shortcuts(&app, &previous, &settings);
+        register_shortcuts(app, &previous, &settings);
     }
     if previous.launch_at_login != settings.launch_at_login {
-        apply_autostart(&app, settings.launch_at_login);
+        apply_autostart(app, settings.launch_at_login);
+    }
+    // Only the engine list and the active provider show up in the tray.
+    if previous.provider_id != settings.provider_id
+        || previous.custom_providers != settings.custom_providers
+        || previous.hotkey_show_last != settings.hotkey_show_last
+        || previous.hotkey_translate_selection != settings.hotkey_translate_selection
+    {
+        tray::refresh(app, &TrayIconId::new(TRAY_ID));
     }
 
-    tray::refresh(&app, &TrayIconId::new(TRAY_ID));
-    // Other windows mirror the change; the sender already has it applied.
-    let _ = app.emit("settings-changed", &settings);
+    let _ = app.emit_filter("settings-changed", &settings, |target| match target {
+        tauri::EventTarget::WebviewWindow { label } => Some(label) != origin.as_ref(),
+        _ => false,
+    });
     Ok(())
 }
 
@@ -475,7 +503,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                         let state = app.state::<AppState>();
                         let mut settings = state.settings.read().clone();
                         settings.provider_id = provider_id.to_string();
-                        if let Err(err) = save_settings(app.clone(), state, settings) {
+                        // No origin window: every window should hear about a
+                        // switch made from the tray.
+                        if let Err(err) = apply_settings(app, &state, settings, None) {
                             log::error!("could not switch engine: {err}");
                         }
                     }

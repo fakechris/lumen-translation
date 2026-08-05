@@ -50,6 +50,8 @@ export function TranslateWindow() {
   const syncing = useRef(false);
   // Lets a newly arrived request cancel the one in flight.
   const runId = useRef(0);
+  // Last height asked of Rust, so an echoed resize isn't re-sent.
+  const lastHeight = useRef(0);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
@@ -154,6 +156,12 @@ export function TranslateWindow() {
             (translationRef.current?.scrollHeight ?? 0),
         ),
       );
+      // Resizing the window changes the panes' box size, which fires the
+      // observer again. The measurement is content-based so it converges, but
+      // skipping the no-op keeps it to one round trip instead of two — and
+      // stops a rounding disagreement between here and Rust from ping-ponging.
+      if (height === lastHeight.current) return;
+      lastHeight.current = height;
       void invoke("place_translate_window", { width: WIDTH, height });
     };
     measure();
