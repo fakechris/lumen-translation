@@ -1,0 +1,406 @@
+/*
+ * Lumen Design System "Atelier" — warm parchment surface.
+ * Colour values are kept in sync with the macOS app
+ * (apps/popclip-window/LumenTranslation/LumenTranslationApp.swift).
+ */
+
+:root {
+  --surface: #fffdfa;
+  --surface-sunken: #f7f3ec;
+  --border: #e7e1d8;
+  --ink: #1f1a17;
+  --ink-source: #443a32;
+  --ink-muted: #71675d;
+  --accent: #2f7d52;
+  --danger: #a3402c;
+  --radius: 16px;
+
+  color-scheme: light;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
+    "Microsoft YaHei UI", sans-serif;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  /* Every window is a borderless, transparent Tauri window: the rounded card
+     is drawn by the document, not by the OS frame. */
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button {
+  font: inherit;
+  cursor: default;
+}
+
+/* ------------------------------------------------------------------ */
+/* Translation window                                                   */
+/* ------------------------------------------------------------------ */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.translate-card {
+  /* Matches the 16/12/12/14/16 vertical rhythm of the AppKit layout. */
+  padding: 28px 16px 14px;
+  gap: 12px;
+  min-height: 240px;
+}
+
+/* The whole card is a drag handle except for interactive regions, mirroring
+   `isMovableByWindowBackground` on macOS. */
+.translate-card,
+.bar {
+  -webkit-app-region: drag;
+}
+
+.text-pane,
+button,
+select,
+input,
+textarea,
+a {
+  -webkit-app-region: no-drag;
+}
+
+.text-pane {
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.text-pane.source {
+  color: var(--ink-source);
+}
+
+.text-pane.translation {
+  color: var(--ink);
+}
+
+.text-pane.error {
+  color: var(--danger);
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  flex: none;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 5px;
+  border-radius: 6px;
+}
+
+.icon-button:hover {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+.icon-button:disabled {
+  opacity: 0.4;
+}
+
+.engine-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.engine-label.status {
+  color: var(--accent);
+}
+
+.close-button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink-muted);
+  -webkit-app-region: no-drag;
+}
+
+.close-button:hover {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--ink-muted);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Selection action bar (the PopClip stand-in)                          */
+/* ------------------------------------------------------------------ */
+
+.bar-body {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgb(31 26 23 / 18%);
+}
+
+.bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.bar button:hover {
+  background: var(--surface-sunken);
+}
+
+/* ------------------------------------------------------------------ */
+/* Preferences window                                                   */
+/* ------------------------------------------------------------------ */
+
+.prefs-body {
+  height: 100vh;
+}
+
+.prefs {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.prefs-titlebar {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  flex: none;
+}
+
+.prefs-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  flex: none;
+}
+
+.prefs-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 6px 12px;
+  border-radius: 8px 8px 0 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.prefs-tabs button[aria-selected="true"] {
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.prefs-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px 20px;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.field > label {
+  color: var(--ink-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.field.stacked {
+  grid-template-columns: 1fr;
+}
+
+.field.stacked > label {
+  text-align: left;
+}
+
+.field.check {
+  grid-template-columns: 190px 1fr;
+}
+
+.field.check > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+input:focus-visible,
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.hint {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin: -6px 0 12px;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  margin: 20px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-title:first-child {
+  margin-top: 0;
+}
+
+.custom-slot {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 12px 2px;
+  margin-bottom: 12px;
+  background: var(--surface-sunken);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.push {
+  margin-left: auto;
+}
+
+.text-button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  padding: 5px 11px;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.text-button:hover {
+  background: var(--surface-sunken);
+}
+
+.text-button.danger {
+  color: var(--danger);
+}
+
+.probe-result {
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.probe-result.ok {
+  color: var(--accent);
+}
+
+.probe-result.fail {
+  color: var(--danger);
+}

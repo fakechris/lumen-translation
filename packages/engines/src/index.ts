@@ -16,6 +16,13 @@ export {
   createProviderEngine,
   getProviderPreset,
   PROVIDER_CATALOG,
+  // The raw, unfiltered catalog file. `PROVIDER_CATALOG` above is the browser
+  // extension's view of it; hosts with different UI policy (e.g. the desktop
+  // app, which also offers `openai` and the free MT engines) build their own
+  // adapter view from this.
+  PROVIDER_CATALOG_SOURCE,
+  type CatalogProvider,
+  type ProviderCatalogFile,
   type ProviderPreset,
   type ProviderEngineOptions,
 } from "./providers.js";

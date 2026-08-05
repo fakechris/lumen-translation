@@ -1,6 +1,10 @@
 node_modules
 dist
 build
+# Rust / Tauri build output. `gen/` holds the capability schemas tauri-build
+# regenerates on every compile.
+target
+apps/desktop/src-tauri/gen
 .output
 .wxt
 *.log

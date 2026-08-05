@@ -1,0 +1,30 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities shared by the translation, preferences, and action-bar windows.",
+  "windows": ["translate", "prefs", "bar"],
+  "permissions": [
+    "core:default",
+    "core:app:allow-version",
+    "core:event:default",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-current-monitor",
+    "core:window:allow-scale-factor",
+    "core:window:allow-start-dragging",
+    "core:webview:allow-internal-toggle-devtools",
+    "opener:allow-open-url",
+    {
+      "identifier": "http:default",
+      "comment": "Any HTTPS host, plus loopback for Ollama / LM Studio. A curated allowlist can't work here: the Custom tab exists precisely so users can point Lumen at their own OpenAI-compatible endpoint. The webview only ever loads local bundled assets, so there is no remote content that could abuse the scope.",
+      "allow": [
+        { "url": "https://*/*" },
+        { "url": "http://localhost:*/*" },
+        { "url": "http://127.0.0.1:*/*" }
+      ]
+    }
+  ]
+}

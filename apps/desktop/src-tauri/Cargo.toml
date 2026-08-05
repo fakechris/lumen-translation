@@ -1,0 +1,82 @@
+[package]
+name = "lumen-translation-desktop"
+version = "0.1.0"
+description = "Lumen Translation desktop app for Windows"
+authors = ["Lumen Translation contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/fakechris/lumen-translation"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+# Tauri's recommended layout: `main.rs` is a thin shim over the library so the
+# same code can be compiled for mobile targets and unit-tested.
+name = "lumen_translation_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `macos-private-api` is what gates `WebviewWindowBuilder::transparent`, and
+# all three of our windows are transparent rounded cards. The app only ships on
+# Windows, but the crate has to compile on a macOS or Linux workstation, and
+# the feature is what keeps that a single code path instead of three
+# cfg-splintered builder chains.
+tauri = { version = "2", features = [
+  "tray-icon",
+  "image-png",
+  "macos-private-api",
+] }
+tauri-plugin-global-shortcut = "2"
+# `native-tls` rather than the default `rustls-tls`: on Windows that resolves
+# to SChannel, so HTTPS uses the system certificate store. Enterprise machines
+# with an inspecting proxy or a private CA then work without the user having to
+# install anything, which a bundled webpki root store could not do. It also
+# drops `ring`, whose C build is the one thing in the dependency tree that
+# can't be cross-checked from a non-Windows workstation.
+tauri-plugin-http = { version = "2", default-features = false, features = [
+  "native-tls",
+  "http2",
+  "charset",
+  "cookies",
+] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parking_lot = "0.12"
+log = "0.4"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Security_Cryptography",
+  "Win32_System_Com",
+  "Win32_System_DataExchange",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+  "Win32_UI_Accessibility",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+# A tray app that sits idle: favour a small binary over marginal speed.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
