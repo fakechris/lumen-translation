@@ -73,7 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let quitItem = menu.addItem(withTitle: "Quit Lumen Translation", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     quitItem.target = NSApplication.shared
     statusItem.menu = menu
-    NSLog("[LumenTranslation] status item ready: hasButton=\(statusItem.button != nil) menuItems=\(menu.numberOfItems) providers=\(Preferences.shared.allProviders.count)")
 
     // Global hotkey ⌥⌘L: re-show the last translation from any app, keeping
     // its original source + translation context.
@@ -169,10 +168,15 @@ final class ConfigureCommand: NSScriptCommand {
     if let v = dict["engine"] as? String, !v.isEmpty {
       prefs.providerId = v
     }
-    if let v = dict["apiKey"] as? String, !v.isEmpty, let pid = dict["engine"] as? String {
+    // Only bind a key/model to a provider when PopClip actually names one.
+    // With engine defaulting to "" ("App Setting"), the app's own per-provider
+    // config stays authoritative and we avoid an orphaned "lumen.apiKey." write.
+    if let v = dict["apiKey"] as? String, !v.isEmpty,
+       let pid = dict["engine"] as? String, !pid.isEmpty {
       prefs.setApiKey(v, for: pid)
     }
-    if let v = dict["model"] as? String, !v.isEmpty, let pid = dict["engine"] as? String {
+    if let v = dict["model"] as? String, !v.isEmpty,
+       let pid = dict["engine"] as? String, !pid.isEmpty {
       prefs.setModel(v, for: pid)
     }
     if let v = dict["region"] as? String, !v.isEmpty {

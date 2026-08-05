@@ -174,7 +174,7 @@ final class Preferences {
   static func normalizeChatEndpoint(_ raw: String) -> String {
     var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     while s.hasSuffix("/") { s.removeLast() }
-    if s.hasSuffix("/chat/completions") { return s }
+    if s.lowercased().hasSuffix("/chat/completions") { return s }
     return s + "/chat/completions"
   }
 
