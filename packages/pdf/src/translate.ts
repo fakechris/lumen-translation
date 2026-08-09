@@ -16,12 +16,19 @@ export interface TranslatePdfOptions {
   onProgress?: (done: number, total: number) => void;
 }
 
+/** Tail length of the previous paragraph kept as cross-page context. */
+const PREV_CONTEXT_CHARS = 300;
+
 /**
  * Translate the text extracted from PDF pages.
  *
  * Paragraphs are collected across all pages, deduplicated, and passed to the
- * engine via `translateAll`. Translations are written back into each paragraph
- * and progress is reported as translations are completed.
+ * engine via `translateAll`. Each segment carries the previous paragraph's
+ * text as read-only `context.prev` (crossing page boundaries), so engines
+ * that honor segment context keep terminology and tone consistent across a
+ * document instead of translating every paragraph in isolation.
+ * Translations are written back into each paragraph and progress is reported
+ * as translations are completed.
  */
 export async function translatePdf(
   pages: PdfPage[],
@@ -35,13 +42,19 @@ export async function translatePdf(
   }));
 
   const segments: Segment[] = [];
+  let prevText: string | undefined;
   for (const page of bilingualPages) {
     for (const paragraph of page.paragraphs) {
-      segments.push({
+      const segment: Segment = {
         id: paragraph.id,
         text: paragraph.text,
         meta: { pageIndex: page.index, paragraphId: paragraph.id },
-      });
+      };
+      if (prevText !== undefined) {
+        segment.context = { prev: prevText.slice(-PREV_CONTEXT_CHARS) };
+      }
+      segments.push(segment);
+      prevText = paragraph.text;
     }
   }
 

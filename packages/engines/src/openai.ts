@@ -70,14 +70,36 @@ function deepMergeBody(
   return out;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `You are a professional translation engine.
+const DEFAULT_SYSTEM_PROMPT = `You are a professional {TARGET} native translator and writer.
 Translate the user's text from {SOURCE} to {TARGET}.
+
+PRIORITY ORDER:
+1. Preserve exact names and glossary terms.
+2. Match the original tone and formality.
+3. Use natural {TARGET} phrasing — never word-for-word.
+4. Preserve meaning completely; do not omit or add content.
+
 Rules:
-- Return ONLY the translation, no explanations, no quotes.
-- Preserve inline markers like <0>...</0> exactly.
-- Preserve line breaks.
-- Respect the provided glossary when given.
-- If the text is already in the target language, return it unchanged.`;
+- Output ONLY the translation. No explanations, no quotes, no commentary.
+  - WRONG: "Here is the translation: ..."
+  - WRONG: "Sure! ..."
+  - RIGHT: just the translated text, nothing else.
+- Preserve inline markers like <0>...</0> exactly: never translate, remove, reorder, or add them. Example: "This is <0>important</0> text." -> "这是<0>重要的</0>文本。" (markers untouched, in place).
+- Preserve line breaks, spacing, and paragraph structure.
+- Respect the provided glossary exactly when given.
+- If the text is already in {TARGET}, return it unchanged.`;
+
+/** Render a system prompt template by substituting all {SOURCE}/{TARGET} slots. */
+function renderSystemPrompt(template: string, source: string, target: string): string {
+  return template
+    .replaceAll("{SOURCE}", source)
+    .replaceAll("{TARGET}", target);
+}
+
+/** Resolve the language label used for the {SOURCE} slot. */
+function sourceLabel(pair: EngineRequest["pair"]): string {
+  return pair.source === "auto" ? "the source language" : pair.source;
+}
 
 export function createOpenAIEngine(
   opts: OpenAIEngineOptions = {},
@@ -97,9 +119,11 @@ export function createOpenAIEngine(
     async translate(req): Promise<EngineResult> {
       const { pair, segments, glossary } = req;
       if (segments.length === 0) return { segments: [] };
-      const system = (opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT)
-        .replace("{SOURCE}", pair.source === "auto" ? "the source language" : pair.source)
-        .replace("{TARGET}", pair.target);
+      const system = renderSystemPrompt(
+        opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+        sourceLabel(pair),
+        pair.target,
+      );
       const user = buildUserMessage(segments, glossary);
       const res = await fetchWithRetry(
         endpoint,
@@ -142,9 +166,11 @@ export function createOpenAIEngine(
     async *translateStream(req): AsyncIterable<TranslatedSegment> {
       const { pair, segments, glossary } = req;
       if (segments.length === 0) return;
-      const system = (opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT)
-        .replace("{SOURCE}", pair.source === "auto" ? "the source language" : pair.source)
-        .replace("{TARGET}", pair.target);
+      const system = renderSystemPrompt(
+        opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+        sourceLabel(pair),
+        pair.target,
+      );
       const user = buildUserMessage(segments, glossary);
       const res = await fetchWithRetry(
         endpoint,
@@ -298,15 +324,30 @@ export async function* sseDeltas(
 /**
  * Build a batched user message. We tag each segment with an index marker so we
  * can split the model's response back into per-segment translations.
+ *
+ * Glossary entries are filtered to only those whose source term appears in
+ * this batch (matching BabelDOC / TranslateBooksWithLLMs): the full glossary
+ * is never sent, which keeps prompts small and lets providers cache the stable
+ * system prompt. Segment `context.prev` is injected as read-only context so
+ * terminology and tone stay consistent across paragraph boundaries.
  */
-function buildUserMessage(segments: Segment[], glossary?: GlossaryEntry[]): string {
+export function buildUserMessage(
+  segments: Segment[],
+  glossary?: GlossaryEntry[],
+): string {
   let msg = "";
-  if (glossary && glossary.length > 0) {
-    msg += "Glossary:\n";
-    for (const g of glossary) {
-      msg += `- "${g.source}" -> "${g.target}"\n`;
+  const hits = filterGlossary(segments, glossary);
+  if (hits.length > 0) {
+    msg +=
+      "Glossary (use these EXACT translations whenever the source term appears; do not paraphrase):\n";
+    for (const g of hits) {
+      msg += `- "${escapeGlossaryText(g.source)}" -> "${escapeGlossaryText(g.target)}"\n`;
     }
     msg += "\n";
+  }
+  const context = collectContext(segments);
+  if (context) {
+    msg += `Context (previous text, for consistency only — do NOT translate it):\n${context}\n\n`;
   }
   if (segments.length === 1) {
     return msg + segments[0].text;
@@ -317,6 +358,69 @@ function buildUserMessage(segments: Segment[], glossary?: GlossaryEntry[]): stri
     msg += `[[${seg.id}]]\n${seg.text}\n\n`;
   }
   return msg.trim();
+}
+
+/**
+ * Keep only glossary entries whose source term literally appears in the batch.
+ * Case-insensitive for Latin scripts; exact match for CJK and other scripts
+ * where case folding does not apply. Terms containing newlines are skipped so
+ * they can never break the prompt structure.
+ */
+function filterGlossary(
+  segments: Segment[],
+  glossary?: GlossaryEntry[],
+): GlossaryEntry[] {
+  if (!glossary || glossary.length === 0) return [];
+  const haystack = segments.map((seg) => seg.text).join("\n");
+  const lowered = haystack.toLowerCase();
+  const seen = new Set<string>();
+  const hits: GlossaryEntry[] = [];
+  for (const g of glossary) {
+    const source = g.source.trim();
+    if (source === "" || source.includes("\n")) continue;
+    const hit = isAscii(source)
+      ? lowered.includes(source.toLowerCase())
+      : haystack.includes(source);
+    if (!hit || seen.has(source)) continue;
+    seen.add(source);
+    hits.push(g);
+  }
+  return hits;
+}
+
+function isAscii(text: string): boolean {
+  return /^[ -~]*$/.test(text);
+}
+
+/** Quote/CR/LF inside glossary terms could break the "- src -> tgt" lines. */
+function escapeGlossaryText(text: string): string {
+  return text.replaceAll('"', "'").replaceAll("\r", " ").replaceAll("\n", " ");
+}
+
+/** Cap for context text so a huge previous block cannot bloat the prompt. */
+const CONTEXT_CHAR_LIMIT = 400;
+
+/**
+ * Collect unique `context.prev` snippets from the batch, in order. These give
+ * the model cross-paragraph continuity (terminology, names, tone) without
+ * asking it to translate anything but the batch itself.
+ */
+function collectContext(segments: Segment[]): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const seg of segments) {
+    const prev = seg.context?.prev?.trim();
+    if (!prev || seen.has(prev)) continue;
+    seen.add(prev);
+    parts.push(truncateMiddle(prev, CONTEXT_CHAR_LIMIT));
+  }
+  return parts.join("\n---\n");
+}
+
+function truncateMiddle(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const half = Math.floor((limit - 1) / 2);
+  return `${text.slice(0, half)}…${text.slice(text.length - half)}`;
 }
 
 function parseBatchResponse(content: string, segments: Segment[]): TranslatedSegment[] {

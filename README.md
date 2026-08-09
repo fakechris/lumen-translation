@@ -143,7 +143,9 @@ LLM features:
 
 - **Streaming output** (SSE parser) for all OpenAI-compatible engines.
 - **Batch + concurrency control** with segment deduplication (`dedupeSegments`) so identical sentences are translated once.
-- **AI glossary / terminology dictionary** passed to every LLM request.
+- **AI glossary / terminology dictionary**, filtered per batch so only terms that actually appear in the text are sent — long glossaries cost no extra tokens on unrelated content.
+- **Native-speaker system prompt** with a priority order (exact names and glossary terms → tone → natural phrasing over word-for-word), inline-marker examples, and explicit "output only the translation" formatting rules.
+- **Cross-paragraph context**: PDF translation feeds each paragraph the tail of the previous one as read-only context, so terminology and tone stay consistent across page breaks.
 - **MiniMax & SiliconFlow region toggle** (domestic / overseas endpoint).
 - **Model presets** per provider with a custom-model fallback.
 
