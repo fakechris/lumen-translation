@@ -11,7 +11,6 @@
 
 use std::cell::RefCell;
 
-use windows::core::Interface;
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
@@ -118,9 +117,8 @@ pub fn probe_selection() -> SelectionProbe {
 
     // SAFETY: `element` is live; a missing pattern surfaces as an error or a
     // null interface rather than UB.
-    let pattern = unsafe { element.GetCurrentPattern(UIA_TextPatternId) }
-        .ok()
-        .and_then(|unknown| unknown.cast::<IUIAutomationTextPattern>().ok());
+    let pattern =
+        unsafe { element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) }.ok();
 
     match pattern {
         Some(pattern) => match selection_text(&pattern) {

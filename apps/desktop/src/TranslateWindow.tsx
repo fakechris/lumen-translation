@@ -8,19 +8,19 @@
  * hide (never destroy) the window so ⌥⌘L's counterpart can re-open it.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { CloseIcon, CopyIcon, SpeakIcon } from "./Icons";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { CloseIcon, CopyIcon, SpeakIcon } from './Icons';
 import {
   allProviders,
   DEFAULT_SETTINGS,
   loadSettings,
   onSettingsChanged,
   type Settings,
-} from "./settings";
-import { translate, TranslationFailed } from "./translate";
+} from './settings';
+import { translate, TranslationFailed } from './translate';
 
 const WIDTH = 400;
 /** 28 top + 12 + divider + 12 + 14 + 24 footer + 14 bottom. */
@@ -35,7 +35,7 @@ interface Payload {
   failed?: boolean;
 }
 
-const EMPTY: Payload = { source: "", translation: "", engine: "" };
+const EMPTY: Payload = { source: '', translation: '', engine: '' };
 
 export function TranslateWindow() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -54,14 +54,33 @@ export function TranslateWindow() {
   const lastHeight = useRef(0);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const settingsReady = useRef<Promise<Settings> | null>(null);
+
+  const applyLoadedSettings = useCallback((next: Settings) => {
+    settingsRef.current = next;
+    setSettings(next);
+  }, []);
+
+  const ensureSettings = useCallback(() => {
+    if (!settingsReady.current) {
+      settingsReady.current = loadSettings().then((next) => {
+        applyLoadedSettings(next);
+        return next;
+      });
+    }
+    return settingsReady.current;
+  }, [applyLoadedSettings]);
 
   useEffect(() => {
-    loadSettings().then(setSettings).catch(console.error);
-    const un = onSettingsChanged(setSettings);
+    void ensureSettings().catch(console.error);
+    const un = onSettingsChanged((next) => {
+      applyLoadedSettings(next);
+      settingsReady.current = Promise.resolve(next);
+    });
     return () => {
       un.then((f) => f()).catch(() => undefined);
     };
-  }, []);
+  }, [applyLoadedSettings, ensureSettings]);
 
   // The tray's Engine submenu is rendered by Rust but populated from here: the
   // provider catalog is parsed once, in TypeScript, and this window is the one
@@ -71,46 +90,63 @@ export function TranslateWindow() {
       id: p.id,
       label: p.label,
     }));
-    void invoke("set_engine_list", { engines }).catch(console.error);
+    void invoke('set_engine_list', { engines }).catch(console.error);
   }, [settings]);
 
-  const run = useCallback(async (text: string) => {
-    const id = ++runId.current;
-    setBusy(true);
-    setCopied(false);
-    setPayload({ source: text, translation: "", engine: "" });
-    try {
-      const res = await translate(text, settingsRef.current, {
-        onPartial: (partial, engine) => {
-          if (runId.current !== id) return;
-          setPayload({ source: text, translation: partial, engine });
-        },
-      });
-      if (runId.current !== id) return;
-      setPayload({ source: text, translation: res.translation, engine: res.engine });
-    } catch (err) {
-      if (runId.current !== id) return;
-      const message =
-        err instanceof TranslationFailed ? err.message : String(err);
-      setPayload({
-        source: text,
-        translation: `Lumen error: ${message}`,
-        engine: "error",
-        failed: true,
-      });
-    } finally {
-      if (runId.current === id) setBusy(false);
-    }
-  }, []);
+  const run = useCallback(
+    async (text: string) => {
+      const loaded = await ensureSettings();
+      const activeSettings = settingsRef.current ?? loaded;
+      const id = ++runId.current;
+      setBusy(true);
+      setCopied(false);
+      setPayload({ source: text, translation: '', engine: '' });
+      try {
+        const res = await translate(text, activeSettings, {
+          onPartial: (partial, engine) => {
+            if (runId.current !== id) return;
+            setPayload({ source: text, translation: partial, engine });
+          },
+        });
+        if (runId.current !== id) return;
+        setPayload({ source: text, translation: res.translation, engine: res.engine });
+      } catch (err) {
+        if (runId.current !== id) return;
+        const message = err instanceof TranslationFailed ? err.message : String(err);
+        setPayload({
+          source: text,
+          translation: `Lumen error: ${message}`,
+          engine: 'error',
+          failed: true,
+        });
+      } finally {
+        if (runId.current === id) setBusy(false);
+      }
+    },
+    [ensureSettings],
+  );
 
-  // Requests arrive from the tray, the global hotkey, or the action bar.
+  // Requests arrive from the tray, the global hotkey, or the action bar. The
+  // event is only a wake-up: the payload is pulled from Rust after this
+  // listener exists, so the first request cannot disappear during React mount.
   useEffect(() => {
-    const un = listen<{ text: string }>("translate-text", (e) => {
-      const text = e.payload.text.trim();
-      if (text) void run(text);
-    });
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    const consumePending = async () => {
+      const pending = await invoke<string | null>('take_pending_translation');
+      const text = pending?.trim();
+      if (!disposed && text) await run(text);
+    };
+    void listen('translate-text', () => void consumePending())
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+        return consumePending();
+      })
+      .catch(console.error);
     return () => {
-      un.then((f) => f()).catch(() => undefined);
+      disposed = true;
+      unlisten?.();
     };
   }, [run]);
 
@@ -122,13 +158,13 @@ export function TranslateWindow() {
   // window, so the accelerator is handled here rather than by the OS.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || (e.ctrlKey && e.key.toLowerCase() === "w")) {
+      if (e.key === 'Escape' || (e.ctrlKey && e.key.toLowerCase() === 'w')) {
         e.preventDefault();
         hide();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [hide]);
 
   // Click-outside hides, matching `windowDidResignKey` on macOS.
@@ -152,8 +188,8 @@ export function TranslateWindow() {
         MIN_HEIGHT,
         Math.ceil(
           CHROME_HEIGHT +
-            (sourceRef.current?.scrollHeight ?? 0) +
-            (translationRef.current?.scrollHeight ?? 0),
+            (sourceRef.current?.clientHeight ?? 0) +
+            (translationRef.current?.clientHeight ?? 0),
         ),
       );
       // Resizing the window changes the panes' box size, which fires the
@@ -162,7 +198,7 @@ export function TranslateWindow() {
       // stops a rounding disagreement between here and Rust from ping-ponging.
       if (height === lastHeight.current) return;
       lastHeight.current = height;
-      void invoke("place_translate_window", { width: WIDTH, height });
+      void invoke('place_translate_window', { width: WIDTH, height });
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -202,7 +238,7 @@ export function TranslateWindow() {
   const hasTranslation = payload.translation.length > 0 && !payload.failed;
 
   return (
-    <div className="card translate-card" ref={cardRef} style={{ position: "relative" }}>
+    <div className="card translate-card" ref={cardRef} style={{ position: 'relative' }}>
       <button className="close-button" onClick={hide} title="Close (Esc)">
         <CloseIcon />
       </button>
@@ -211,7 +247,7 @@ export function TranslateWindow() {
         className="text-pane source"
         ref={sourceRef}
         onScroll={onSourceScroll}
-        style={{ maxHeight: "35vh" }}
+        style={{ maxHeight: '35vh' }}
       >
         {payload.source}
       </div>
@@ -219,9 +255,9 @@ export function TranslateWindow() {
       <div className="divider" />
 
       <div
-        className={`text-pane translation${payload.failed ? " error" : ""}`}
+        className={`text-pane translation${payload.failed ? ' error' : ''}`}
         ref={translationRef}
-        style={{ maxHeight: "45vh" }}
+        style={{ maxHeight: '45vh' }}
       >
         {payload.translation}
       </div>
@@ -246,8 +282,8 @@ export function TranslateWindow() {
           Speak
         </button>
         {busy && <div className="spinner" />}
-        <span className={`engine-label${copied ? " status" : ""}`}>
-          {copied ? "Copied" : payload.engine}
+        <span className={`engine-label${copied ? ' status' : ''}`}>
+          {copied ? 'Copied' : payload.engine}
         </span>
       </div>
     </div>

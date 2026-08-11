@@ -16,8 +16,13 @@
   --radius: 16px;
 
   color-scheme: light;
-  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
-    "Microsoft YaHei UI", sans-serif;
+  font-family:
+    'Segoe UI Variable Text',
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    'Microsoft YaHei UI',
+    sans-serif;
   font-size: 14px;
   color: var(--ink);
 }
@@ -80,7 +85,7 @@ a {
 .text-pane {
   overflow-y: auto;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   user-select: text;
   -webkit-user-select: text;
   line-height: 1.5;
@@ -270,7 +275,7 @@ a {
   color: var(--ink-muted);
 }
 
-.prefs-tabs button[aria-selected="true"] {
+.prefs-tabs button[aria-selected='true'] {
   background: var(--surface-sunken);
   color: var(--ink);
   font-weight: 600;
@@ -314,9 +319,9 @@ a {
   gap: 8px;
 }
 
-input[type="text"],
-input[type="password"],
-input[type="number"],
+input[type='text'],
+input[type='password'],
+input[type='number'],
 select {
   width: 100%;
   padding: 6px 8px;

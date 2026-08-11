@@ -15,10 +15,7 @@
  * like the Swift one, wants all of them.
  */
 
-import {
-  PROVIDER_CATALOG_SOURCE,
-  type CatalogProvider,
-} from "@lumen/engines";
+import { PROVIDER_CATALOG_SOURCE, type CatalogProvider } from '@lumen/engines';
 
 export interface ProviderPreset {
   id: string;
@@ -49,14 +46,14 @@ export interface ProviderPreset {
  * chat), and four major Chinese providers.
  */
 export const CURATED_IDS = [
-  "google_translate",
-  "microsoft_translator",
-  "openai",
-  "openrouter",
-  "kimi",
-  "glm",
-  "minimax",
-  "deepseek",
+  'google_translate',
+  'microsoft_translator',
+  'openai',
+  'openrouter',
+  'kimi',
+  'glm',
+  'minimax',
+  'deepseek',
 ];
 
 /**
@@ -64,18 +61,18 @@ export const CURATED_IDS = [
  * this app's OpenRouter-routed Claude preset, so a key saved under it is an
  * OpenRouter key.
  */
-export const LEGACY_ID_MAP: Record<string, string> = { anthropic: "openrouter" };
+export const LEGACY_ID_MAP: Record<string, string> = { anthropic: 'openrouter' };
 
 /**
  * Wire protocols this app implements. Mirrors `Providers.isSupported`.
  */
 function isSupported(p: CatalogProvider): boolean {
-  if (p.capabilities.includes("chat")) {
-    return p.api_style === "openai_compat" && p.region !== "local";
+  if (p.capabilities.includes('chat')) {
+    return p.api_style === 'openai_compat' && p.region !== 'local';
   }
   return (
-    p.capabilities.includes("translation") &&
-    (p.api_style === "google_translate" || p.api_style === "microsoft_translator")
+    p.capabilities.includes('translation') &&
+    (p.api_style === 'google_translate' || p.api_style === 'microsoft_translator')
   );
 }
 
@@ -88,7 +85,7 @@ function isSupported(p: CatalogProvider): boolean {
 function toLabel(displayName: { en: string; zh?: string }): string {
   const { en, zh } = displayName;
   if (!zh || zh === en) return en;
-  const enFirstWord = en.split(/[\s(（]/)[0]?.toLowerCase() ?? "";
+  const enFirstWord = en.split(/[\s(（]/)[0]?.toLowerCase() ?? '';
   if (enFirstWord && zh.toLowerCase().includes(enFirstWord)) return zh;
   return `${en} ${zh}`;
 }
@@ -98,23 +95,18 @@ function toPreset(p: CatalogProvider): ProviderPreset | undefined {
   if (!primary) return undefined;
   // `openai_compat` base_url excludes the chat path; MT base_url is already
   // the full endpoint.
-  const chatPath =
-    p.api_style === "openai_compat" ? (p.chat_path ?? "/chat/completions") : "";
+  const chatPath = p.api_style === 'openai_compat' ? (p.chat_path ?? '/chat/completions') : '';
   const overseas =
-    p.endpoints?.cn && p.endpoints?.global
-      ? p.endpoints.global.base_url + chatPath
-      : undefined;
+    p.endpoints?.cn && p.endpoints?.global ? p.endpoints.global.base_url + chatPath : undefined;
   const noThinking =
-    p.quirks?.no_thinking?.strategy === "body_params"
-      ? p.quirks.no_thinking
-      : undefined;
+    p.quirks?.no_thinking?.strategy === 'body_params' ? p.quirks.no_thinking : undefined;
   return {
     id: p.id,
     label: toLabel(p.display_name),
     apiStyle: p.api_style,
     endpointCN: primary.base_url + chatPath,
     endpointOverseas: overseas,
-    defaultModel: p.default_model ?? "",
+    defaultModel: p.default_model ?? '',
     models: p.models ?? [],
     docsURL: p.docs_url,
     needsKey: p.needs_key,
@@ -132,28 +124,28 @@ function toPreset(p: CatalogProvider): ProviderPreset | undefined {
  */
 const FALLBACK_CATALOG: ProviderPreset[] = [
   {
-    id: "google_translate",
-    label: "Google 翻译（免费，无需 Key）",
-    apiStyle: "google_translate",
-    endpointCN: "https://translate.googleapis.com/translate_a/single",
-    defaultModel: "gtx",
-    models: ["gtx"],
-    docsURL: "https://translate.google.com",
+    id: 'google_translate',
+    label: 'Google 翻译（免费，无需 Key）',
+    apiStyle: 'google_translate',
+    endpointCN: 'https://translate.googleapis.com/translate_a/single',
+    defaultModel: 'gtx',
+    models: ['gtx'],
+    docsURL: 'https://translate.google.com',
     needsKey: false,
     extraHeaders: {},
-    aliases: ["google"],
+    aliases: ['google'],
   },
   {
-    id: "microsoft_translator",
-    label: "微软翻译（免费，无需 Key）",
-    apiStyle: "microsoft_translator",
-    endpointCN: "https://api.cognitive.microsofttranslator.com/translate",
-    defaultModel: "free",
-    models: ["free"],
-    docsURL: "https://www.bing.com/translator",
+    id: 'microsoft_translator',
+    label: '微软翻译（免费，无需 Key）',
+    apiStyle: 'microsoft_translator',
+    endpointCN: 'https://api.cognitive.microsofttranslator.com/translate',
+    defaultModel: 'free',
+    models: ['free'],
+    docsURL: 'https://www.bing.com/translator',
     needsKey: false,
     extraHeaders: {},
-    aliases: ["microsoft"],
+    aliases: ['microsoft'],
   },
 ];
 
@@ -161,6 +153,7 @@ const FALLBACK_CATALOG: ProviderPreset[] = [
 export function makeCatalog(
   providers: CatalogProvider[] = PROVIDER_CATALOG_SOURCE.providers,
 ): ProviderPreset[] {
+  if (!Array.isArray(providers)) return FALLBACK_CATALOG;
   const byId = new Map(providers.map((p) => [p.id, p]));
   const presets = CURATED_IDS.flatMap((id) => {
     const p = byId.get(id);
@@ -184,9 +177,7 @@ export function findProvider(
   return (
     catalog.find((p) => p.id === id) ??
     catalog.find((p) => p.aliases.includes(id)) ??
-    (LEGACY_ID_MAP[id]
-      ? catalog.find((p) => p.id === LEGACY_ID_MAP[id])
-      : undefined)
+    (LEGACY_ID_MAP[id] ? catalog.find((p) => p.id === LEGACY_ID_MAP[id]) : undefined)
   );
 }
 

@@ -56,6 +56,10 @@ pub struct AppState {
     /// Text UI Automation captured when the bar was raised, if any. Consumed
     /// by `translate_selection` so the common path never touches the clipboard.
     pending_selection: Mutex<Option<String>>,
+    /// Translation requests are pulled by the webview after its listener is
+    /// installed. Tauri events are not buffered, so the event alone can lose
+    /// the first request while React is still mounting.
+    pending_translation: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -100,12 +104,31 @@ fn apply_settings(
     settings: Settings,
     origin: Option<String>,
 ) -> Result<(), String> {
-    let previous = state.settings.read().clone();
-    if previous == settings {
-        return Ok(());
-    }
-    settings::save(&state.settings_path, &settings).map_err(|e| e.to_string())?;
-    *state.settings.write() = settings.clone();
+    apply_settings_with(app, state, origin, |_| settings)
+}
+
+/// Apply one settings transformation while holding the single write guard
+/// across compare, durable save, and in-memory replacement.
+fn apply_settings_with<F>(
+    app: &AppHandle,
+    state: &AppState,
+    origin: Option<String>,
+    update: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&Settings) -> Settings,
+{
+    let (previous, settings) = {
+        let mut guard = state.settings.write();
+        let previous = guard.clone();
+        let settings = update(&previous);
+        if previous == settings {
+            return Ok(());
+        }
+        settings::save(&state.settings_path, &settings).map_err(|e| e.to_string())?;
+        *guard = settings.clone();
+        (previous, settings)
+    };
 
     if previous.hotkey_show_last != settings.hotkey_show_last
         || previous.hotkey_translate_selection != settings.hotkey_translate_selection
@@ -219,6 +242,13 @@ fn open_preferences(app: AppHandle) -> Result<(), String> {
     window.set_focus().map_err(|e| e.to_string())
 }
 
+/// Pull the latest translation request after the frontend has installed its
+/// event listener. Taking it makes a mount/event race deliver exactly once.
+#[tauri::command]
+fn take_pending_translation(state: tauri::State<'_, AppState>) -> Option<String> {
+    state.pending_translation.lock().take()
+}
+
 // ---------------------------------------------------------------------------
 // Window helpers
 // ---------------------------------------------------------------------------
@@ -227,6 +257,7 @@ fn show_translation(app: &AppHandle, text: &str) -> Result<(), String> {
     let Some(window) = app.get_webview_window(WINDOW_TRANSLATE) else {
         return Ok(());
     };
+    *app.state::<AppState>().pending_translation.lock() = Some(text.to_string());
     app.emit_to(
         WINDOW_TRANSLATE,
         "translate-text",
@@ -388,6 +419,7 @@ pub fn run() {
             translate_selection,
             show_last,
             open_preferences,
+            take_pending_translation,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -399,6 +431,7 @@ pub fn run() {
                 settings_path,
                 engines: RwLock::new(Vec::new()),
                 pending_selection: Mutex::new(None),
+                pending_translation: Mutex::new(None),
             });
 
             build_windows(&handle)?;
@@ -501,11 +534,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 _ => {
                     if let Some(provider_id) = id.strip_prefix(tray::ENGINE_PREFIX) {
                         let state = app.state::<AppState>();
-                        let mut settings = state.settings.read().clone();
-                        settings.provider_id = provider_id.to_string();
                         // No origin window: every window should hear about a
                         // switch made from the tray.
-                        if let Err(err) = apply_settings(app, &state, settings, None) {
+                        if let Err(err) = apply_settings_with(app, &state, None, |current| {
+                            let mut settings = current.clone();
+                            settings.provider_id = provider_id.to_string();
+                            settings
+                        }) {
                             log::error!("could not switch engine: {err}");
                         }
                     }

@@ -121,7 +121,7 @@ The file-translator page handles plain-text and e-book formats. ePub is parsed a
 Other tools can drive Lumen via a `window` `CustomEvent` named `lumen`:
 
 ```js
-window.dispatchEvent(new CustomEvent("lumen", { detail: { action: "toggle_translate" } }));
+window.dispatchEvent(new CustomEvent('lumen', { detail: { action: 'toggle_translate' } }));
 // actions: toggle_translate | translate_selection | translate_input
 ```
 
@@ -131,13 +131,13 @@ window.dispatchEvent(new CustomEvent("lumen", { detail: { action: "toggle_transl
 
 Engines are grouped in the options UI. All LLM engines are OpenAI-compatible and accept your own API key.
 
-| Group | Engines |
-|---|---|
-| **Free (no key)** | Google Translate, Microsoft Translator |
-| **Classic MT** | DeepL (Free/Pro) |
-| **LLM · China** | DeepSeek 深度求索, GLM 智谱 BigModel, Kimi 月之暗面, MiniMax 海螺, 豆包 字节火山 Ark, 通义千问 阿里 DashScope, 腾讯混元 Hunyuan, 百度文心 ERNIE, 讯飞星火 Spark, 百川 Baichuan, 零一万物 Yi, 硅基流动 SiliconFlow |
-| **LLM · Overseas** | OpenRouter (aggregator, 100+ models) |
-| **Local / Custom** | Ollama (local), OpenAI-compatible custom endpoint |
+| Group              | Engines                                                                                                                                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Free (no key)**  | Google Translate, Microsoft Translator                                                                                                                                                                            |
+| **Classic MT**     | DeepL (Free/Pro)                                                                                                                                                                                                  |
+| **LLM · China**    | DeepSeek 深度求索, GLM 智谱 BigModel, Kimi 月之暗面, MiniMax 海螺, 豆包 字节火山 Ark, 通义千问 阿里 DashScope, 腾讯混元 Hunyuan, 百度文心 ERNIE, 讯飞星火 Spark, 百川 Baichuan, 零一万物 Yi, 硅基流动 SiliconFlow |
+| **LLM · Overseas** | OpenRouter (aggregator, 100+ models)                                                                                                                                                                              |
+| **Local / Custom** | Ollama (local), OpenAI-compatible custom endpoint                                                                                                                                                                 |
 
 LLM features:
 
@@ -151,11 +151,11 @@ LLM features:
 
 ## Keyboard shortcuts
 
-| Shortcut | Action |
-|---|---|
-| `Alt+Q` | Translate / clear current page |
-| `Alt+S` | Translate selection |
-| `Alt+Hover` | Translate hovered block |
+| Shortcut    | Action                         |
+| ----------- | ------------------------------ |
+| `Alt+Q`     | Translate / clear current page |
+| `Alt+S`     | Translate selection            |
+| `Alt+Hover` | Translate hovered block        |
 
 Plus right-click context-menu entries for page, selection, and editable fields.
 
@@ -242,12 +242,15 @@ installed automatically if it's missing.
 
 **1. Install**
 
-Download `Lumen-Translation-<version>-windows-x64-setup.exe` from the [latest
-release](https://github.com/fakechris/lumen-translation/releases/latest) and
-run it. It installs per-user, so no administrator prompt.
-
-The installer isn't signed yet, so SmartScreen will warn on first run — click
-**More info** → **Run anyway**.
+The Windows installer is currently an **unsigned development preview**, not a
+trusted direct-release artifact. Download
+`Lumen-Translation-<version>-windows-x64-setup.exe` and
+`SHA256SUMS-windows.txt` from the [latest
+release](https://github.com/fakechris/lumen-translation/releases/latest), verify
+the SHA-256 value, and optionally verify its signed GitHub provenance with
+`gh attestation verify <installer> --repo fakechris/lumen-translation`. Do not
+run an artifact that fails either check. The installer is per-user and needs no
+administrator prompt; production distribution requires code signing.
 
 Or build it yourself:
 
@@ -263,10 +266,10 @@ Select text in any app → a small **Lumen** bar appears next to the cursor →
 click it. The translation opens in a floating window: **Copy**, **Speak**,
 **Esc** or **Ctrl+W** to dismiss.
 
-| Shortcut | Action |
-| --- | --- |
+| Shortcut     | Action                                                |
+| ------------ | ----------------------------------------------------- |
 | `Alt+Ctrl+T` | Translate the current selection without using the bar |
-| `Alt+Ctrl+L` | Re-open the last translation |
+| `Alt+Ctrl+L` | Re-open the last translation                          |
 
 Both are rebindable in **Preferences → Selection**.
 
@@ -282,7 +285,7 @@ works in most apps, including Chromium and Electron ones.
 
 Some apps expose no accessible text. There, Lumen falls back to pressing
 Ctrl+C for you and restoring whatever was on the clipboard afterwards. That
-fallback only restores *text*, so if you had an image or files copied, they are
+fallback only restores _text_, so if you had an image or files copied, they are
 lost. Turn it off in **Preferences → Selection** to keep the clipboard strictly
 untouched, at the cost of the bar not appearing in those apps.
 
@@ -361,11 +364,11 @@ adapter view of that JSON (OpenAI-compatible chat providers), including per-prov
 
 Three hosts read the catalog, each with its own UI policy over the same data:
 
-| Host | How it reads the catalog | Curated list |
-| --- | --- | --- |
-| Extension / userscript | `PROVIDER_CATALOG` from `@lumen/engines` | OpenAI-compatible chat, minus `openai` |
-| Windows desktop | `PROVIDER_CATALOG_SOURCE` from `@lumen/engines`, adapted in `apps/desktop/src/catalog.ts` | The curated eight, plus both free MT engines |
-| macOS companion | The same JSON, copied into the app bundle by `build.sh` and decoded by `LumenTranslation/ProviderCatalog.swift` | The curated eight, plus both free MT engines |
+| Host                   | How it reads the catalog                                                                                        | Curated list                                 |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Extension / userscript | `PROVIDER_CATALOG` from `@lumen/engines`                                                                        | OpenAI-compatible chat, minus `openai`       |
+| Windows desktop        | `PROVIDER_CATALOG_SOURCE` from `@lumen/engines`, adapted in `apps/desktop/src/catalog.ts`                       | The curated eight, plus both free MT engines |
+| macOS companion        | The same JSON, copied into the app bundle by `build.sh` and decoded by `LumenTranslation/ProviderCatalog.swift` | The curated eight, plus both free MT engines |
 
 The Swift decoder is the one remaining second implementation. It reads the same
 vendored file rather than hardcoding provider data, but its curated-list and
@@ -485,7 +488,11 @@ Status as of `v0.1.0`.
 
 ## Privacy
 
-- All settings, rules, and history are stored locally via `browser.storage.local` (with a `localStorage` fallback in non-extension environments).
+- Extension settings, rules, and history are stored locally via
+  `browser.storage.local` (with a `localStorage` fallback in non-extension
+  environments). The Windows desktop app stores settings under
+  `%APPDATA%\app.lumen.translation`; API-key values are DPAPI-encrypted for the
+  current Windows user, while the remaining preferences are local JSON.
 - AI calls go directly from your device to the engine provider using **your own API key**. Lumen never proxies your traffic.
 - The sync backend is **yours** (your WebDAV server or your Cloudflare Worker). No Lumen-operated cloud sees your data.
 - No telemetry, no analytics, no advertising, no acquisition path. Ever.

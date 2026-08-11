@@ -2,16 +2,16 @@
  * Settings — the Windows counterpart of `Preferences.swift`.
  *
  * macOS keeps these in `UserDefaults`. Here the Rust side owns a JSON file
- * under `%APPDATA%\Lumen Translation\settings.json` (API keys encrypted with
+ * under `%APPDATA%\app.lumen.translation\settings.json` (API keys encrypted with
  * DPAPI) because the backend needs them too: the tray's Engine submenu writes
  * `providerId`, and the selection watcher reads its own toggles. Windows stay
  * in sync through the `settings-changed` event.
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { CATALOG, findProvider, type ProviderPreset } from "./catalog";
-import { autoDetectRegion } from "./lang";
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { CATALOG, findProvider, type ProviderPreset } from './catalog';
+import { autoDetectRegion } from './lang';
 
 /**
  * A user-defined OpenAI-compatible endpoint slot. The `id` is always prefixed
@@ -31,7 +31,7 @@ export interface Settings {
   /** Per-provider model overrides, keyed by canonical provider id. */
   models: Record<string, string>;
   /** `null` means auto-detect. */
-  region: "cn" | "overseas" | null;
+  region: 'cn' | 'overseas' | null;
   sourceLang: string;
   targetLang: string;
   customProviders: CustomProvider[];
@@ -55,38 +55,40 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  providerId: "google_translate",
+  providerId: 'google_translate',
   apiKeys: {},
   models: {},
   region: null,
-  sourceLang: "auto",
-  targetLang: "zh-CN",
+  sourceLang: 'auto',
+  targetLang: 'zh-CN',
   customProviders: [],
   selectionPopupEnabled: true,
   selectionClipboardFallback: true,
   minSelectionChars: 1,
   maxSelectionChars: 5000,
   launchAtLogin: false,
-  hotkeyShowLast: "Alt+Ctrl+L",
-  hotkeyTranslateSelection: "Alt+Ctrl+T",
+  hotkeyShowLast: 'Alt+Ctrl+L',
+  hotkeyTranslateSelection: 'Alt+Ctrl+T',
 };
 
 export async function loadSettings(): Promise<Settings> {
-  const s = await invoke<Settings>("get_settings");
+  const s = await invoke<Settings>('get_settings');
   return { ...DEFAULT_SETTINGS, ...s };
 }
 
-export async function saveSettings(settings: Settings): Promise<void> {
-  await invoke("save_settings", { settings });
+// Preserve write-through order. Preference edits can arrive faster than one
+// IPC/file round trip; sending them concurrently lets an older snapshot win.
+let saveQueue: Promise<void> = Promise.resolve();
+
+export function saveSettings(settings: Settings): Promise<void> {
+  const request = saveQueue.then(() => invoke<void>('save_settings', { settings }));
+  saveQueue = request.catch(() => undefined);
+  return request;
 }
 
 /** Subscribe to changes made in any window or by the tray menu. */
-export async function onSettingsChanged(
-  fn: (s: Settings) => void,
-): Promise<() => void> {
-  return listen<Settings>("settings-changed", (e) =>
-    fn({ ...DEFAULT_SETTINGS, ...e.payload }),
-  );
+export async function onSettingsChanged(fn: (s: Settings) => void): Promise<() => void> {
+  return listen<Settings>('settings-changed', (e) => fn({ ...DEFAULT_SETTINGS, ...e.payload }));
 }
 
 // ---------------------------------------------------------------------------
@@ -105,8 +107,8 @@ export function canonicalId(id: string): string {
 export function customPreset(c: CustomProvider): ProviderPreset {
   return {
     id: c.id,
-    label: c.name || "Custom Endpoint",
-    apiStyle: "openai_compat",
+    label: c.name || 'Custom Endpoint',
+    apiStyle: 'openai_compat',
     endpointCN: normalizeChatEndpoint(c.baseURL),
     defaultModel: c.model,
     models: c.model ? [c.model] : [],
@@ -125,10 +127,7 @@ export function allProviders(s: Settings): ProviderPreset[] {
  * Resolve an id against the catalog *and* the user's custom slots. Custom
  * slots are only known at runtime, so `findProvider` alone can't see them.
  */
-export function findProviderOrCustom(
-  s: Settings,
-  id: string,
-): ProviderPreset | undefined {
+export function findProviderOrCustom(s: Settings, id: string): ProviderPreset | undefined {
   const custom = s.customProviders.find((c) => c.id === id);
   return custom ? customPreset(custom) : findProvider(id);
 }
@@ -144,12 +143,13 @@ export function activeProvider(s: Settings): ProviderPreset {
  */
 export function normalizeChatEndpoint(raw: string): string {
   let s = raw.trim();
-  while (s.endsWith("/")) s = s.slice(0, -1);
-  if (s.toLowerCase().endsWith("/chat/completions")) return s;
+  if (!s) return '';
+  while (s.endsWith('/')) s = s.slice(0, -1);
+  if (/\/chat\/completions(?:\?|$)/i.test(s)) return s;
   return `${s}/chat/completions`;
 }
 
-export function effectiveRegion(s: Settings): "cn" | "overseas" {
+export function effectiveRegion(s: Settings): 'cn' | 'overseas' {
   return s.region ?? autoDetectRegion();
 }
 
@@ -158,23 +158,19 @@ export function effectiveRegion(s: Settings): "cn" | "overseas" {
  * with a trailing newline — don't produce a malformed `Bearer` header.
  */
 export function apiKeyFor(s: Settings, providerId: string): string {
-  return (s.apiKeys[canonicalId(providerId)] ?? "").trim();
+  return (s.apiKeys[canonicalId(providerId)] ?? '').trim();
 }
 
 export function modelFor(s: Settings, providerId: string): string {
   const id = canonicalId(providerId);
   const saved = s.models[id];
   if (saved) return saved;
-  return (
-    findProvider(id)?.defaultModel ??
-    s.customProviders.find((c) => c.id === id)?.model ??
-    ""
-  );
+  return findProvider(id)?.defaultModel ?? s.customProviders.find((c) => c.id === id)?.model ?? '';
 }
 
 /** Resolve the endpoint for a provider given the effective region. */
 export function endpointFor(s: Settings, preset: ProviderPreset): string {
-  if (effectiveRegion(s) === "overseas" && preset.endpointOverseas) {
+  if (effectiveRegion(s) === 'overseas' && preset.endpointOverseas) {
     return preset.endpointOverseas;
   }
   return preset.endpointCN;
@@ -183,8 +179,8 @@ export function endpointFor(s: Settings, preset: ProviderPreset): string {
 export function newCustomProvider(): CustomProvider {
   return {
     id: `custom:${crypto.randomUUID()}`,
-    name: "New endpoint",
-    baseURL: "",
-    model: "",
+    name: 'New endpoint',
+    baseURL: '',
+    model: '',
   };
 }

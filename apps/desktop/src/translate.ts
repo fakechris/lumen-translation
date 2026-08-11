@@ -13,14 +13,10 @@
  * timeout/retry semantics. This module is only the routing and fallback layer.
  */
 
-import type { Engine } from "@lumen/core";
-import {
-  createGoogleEngine,
-  createMicrosoftEngine,
-  createOpenAIEngine,
-} from "@lumen/engines";
-import { noThinkingInjection, type ProviderPreset } from "./catalog";
-import { langLabel } from "./lang";
+import type { Engine } from '@lumen/core';
+import { createGoogleEngine, createMicrosoftEngine, createOpenAIEngine } from '@lumen/engines';
+import { noThinkingInjection, type ProviderPreset } from './catalog';
+import { langLabel } from './lang';
 import {
   activeProvider,
   allProviders,
@@ -29,7 +25,7 @@ import {
   findProviderOrCustom,
   modelFor,
   type Settings,
-} from "./settings";
+} from './settings';
 
 /**
  * The translation system prompt. Deliberately *not* part of the provider
@@ -80,12 +76,11 @@ export interface TranslateOptions {
 export class TranslationFailed extends Error {}
 
 function buildSystemPrompt(source: string, target: string): string {
-  const sourceHint =
-    !source || source === "auto" ? "" : ` (from ${langLabel(source)})`;
-  return SYSTEM_PROMPT.replace(
-    /\{TARGET_LABEL\}/g,
-    langLabel(target),
-  ).replace("{SOURCE_HINT}", sourceHint);
+  const sourceHint = !source || source === 'auto' ? '' : ` (from ${langLabel(source)})`;
+  return SYSTEM_PROMPT.replace(/\{TARGET_LABEL\}/g, langLabel(target)).replace(
+    '{SOURCE_HINT}',
+    sourceHint,
+  );
 }
 
 /**
@@ -104,12 +99,12 @@ export function fallbackChain(s: Settings): ProviderPreset[] {
     seen.add(preset.id);
   };
   add(activeProvider(s));
-  add(findProviderOrCustom(s, "microsoft_translator"));
-  add(findProviderOrCustom(s, "google_translate"));
+  add(findProviderOrCustom(s, 'microsoft_translator'));
+  add(findProviderOrCustom(s, 'google_translate'));
   // Any configured LLM: catalog providers plus the user's custom
   // OpenAI-compatible endpoint slots.
   for (const preset of allProviders(s)) {
-    if (preset.apiStyle === "openai_compat") add(preset);
+    if (preset.apiStyle === 'openai_compat') add(preset);
   }
   return chain;
 }
@@ -117,13 +112,16 @@ export function fallbackChain(s: Settings): ProviderPreset[] {
 /** Build the `@lumen/engines` adapter for one preset. */
 function engineFor(preset: ProviderPreset, s: Settings): Engine {
   const endpoint = endpointFor(s, preset);
+  if (!endpoint) {
+    throw new TranslationFailed(`${preset.label}: endpoint is not configured`);
+  }
   switch (preset.apiStyle) {
-    case "google_translate":
+    case 'google_translate':
       // The engine appends its own query string, so hand it the bare path.
       return createGoogleEngine({
         endpoint: `${endpoint}?client=gtx&dt=t`,
       });
-    case "microsoft_translator":
+    case 'microsoft_translator':
       return createMicrosoftEngine({ endpoint });
     default: {
       const model = modelFor(s, preset.id);
@@ -149,25 +147,25 @@ async function attemptOne(
   const engine = engineFor(preset, s);
   const req = {
     pair: { source: s.sourceLang, target: s.targetLang },
-    segments: [{ id: "0", text }],
+    segments: [{ id: '0', text }],
   };
 
   // Stream when the provider supports it so long passages appear progressively
   // instead of after a 20 s wait.
   if (opts.onPartial && engine.translateStream) {
-    let last = "";
+    let last = '';
     for await (const seg of engine.translateStream(req)) {
       last = seg.text;
       opts.onPartial(last, preset.label);
     }
     const out = last.trim();
-    if (!out) throw new TranslationFailed("empty response");
+    if (!out) throw new TranslationFailed('empty response');
     return out;
   }
 
   const res = await engine.translate(req);
-  const out = (res.segments[0]?.text ?? "").trim();
-  if (!out) throw new TranslationFailed("empty response");
+  const out = (res.segments[0]?.text ?? '').trim();
+  if (!out) throw new TranslationFailed('empty response');
   return out;
 }
 
@@ -181,12 +179,11 @@ export async function translate(
   opts: TranslateOptions = {},
 ): Promise<TranslationResult> {
   const chain = fallbackChain(s);
-  const truncated =
-    text.length > s.maxSelectionChars ? text.slice(0, s.maxSelectionChars) : text;
-  let lastError = "no translation provider available";
+  const truncated = text.length > s.maxSelectionChars ? text.slice(0, s.maxSelectionChars) : text;
+  let lastError = 'no translation provider available';
 
   for (const preset of chain) {
-    if (opts.signal?.aborted) throw new TranslationFailed("aborted");
+    if (opts.signal?.aborted) throw new TranslationFailed('aborted');
     try {
       const translation = await attemptOne(preset, truncated, s, opts);
       return { translation, engine: preset.label };

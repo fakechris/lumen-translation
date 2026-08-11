@@ -13,7 +13,7 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{HANDLE, HGLOBAL};
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
     SetClipboardData,
@@ -115,13 +115,17 @@ fn try_write_text(text: &str) -> windows::core::Result<()> {
         let global = GlobalAlloc(GMEM_MOVEABLE, bytes)?;
         let dst = GlobalLock(global) as *mut u16;
         if dst.is_null() {
+            let _ = GlobalFree(Some(global));
             return Err(windows::core::Error::from_win32());
         }
         std::ptr::copy_nonoverlapping(utf16.as_ptr(), dst, utf16.len());
         let _ = GlobalUnlock(global);
         // On success the clipboard owns the allocation, so it must not be
         // freed here.
-        SetClipboardData(CF_UNICODETEXT, Some(HANDLE(global.0)))?;
+        if let Err(err) = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(global.0))) {
+            let _ = GlobalFree(Some(global));
+            return Err(err);
+        }
     }
     Ok(())
 }
@@ -243,17 +247,27 @@ mod tests {
     #[test]
     fn text_round_trips_through_the_clipboard() {
         let _serialised = CLIPBOARD.lock();
+        let saved = read_text();
         // Unicode beyond the BMP exercises the UTF-16 surrogate path.
         let sample = "翻訳 test 🌤";
         try_write_text(sample).expect("write to the clipboard");
-        assert_eq!(read_text().as_deref(), Some(sample));
+        let got = read_text();
+        if let Some(saved) = saved {
+            try_write_text(&saved).expect("restore the clipboard");
+        }
+        assert_eq!(got.as_deref(), Some(sample));
     }
 
     #[test]
     fn sequence_number_advances_on_write() {
         let _serialised = CLIPBOARD.lock();
+        let saved = read_text();
         let before = sequence_number();
         try_write_text("lumen sequence probe").expect("write to the clipboard");
-        assert_ne!(sequence_number(), before);
+        let after = sequence_number();
+        if let Some(saved) = saved {
+            try_write_text(&saved).expect("restore the clipboard");
+        }
+        assert_ne!(after, before);
     }
 }

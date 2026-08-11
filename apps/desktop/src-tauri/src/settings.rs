@@ -1,7 +1,7 @@
 //! Persisted settings — the Windows counterpart of `Preferences.swift`.
 //!
 //! macOS stores these in `UserDefaults`. Here they live in
-//! `%APPDATA%\Lumen Translation\settings.json`, owned by Rust rather than by
+//! `%APPDATA%\app.lumen.translation\settings.json`, owned by Rust rather than by
 //! the webview because the backend needs them too: the tray's Engine submenu
 //! writes `providerId`, and the selection watcher reads its own toggles.
 //!
@@ -11,9 +11,12 @@
 //! than surfaced as garbage.
 
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use crate::platform::secret;
@@ -96,11 +99,24 @@ pub fn load(path: &Path) -> Settings {
             return Settings::default();
         }
     };
-    settings.api_keys = settings
-        .api_keys
-        .into_iter()
-        .filter_map(|(id, value)| decrypt_key(&value).map(|plain| (id, plain)))
-        .collect();
+    let mut decrypted = BTreeMap::new();
+    let mut dropped = Vec::new();
+    for (id, value) in settings.api_keys {
+        match decrypt_key(&value) {
+            Some(plain) => {
+                decrypted.insert(id, plain);
+            }
+            None => dropped.push(id),
+        }
+    }
+    if !dropped.is_empty() {
+        log::error!(
+            "could not decrypt API keys for providers {}; preserving the original file as settings.json.dpapi.bak",
+            dropped.join(", ")
+        );
+        let _ = fs::write(path.with_extension("json.dpapi.bak"), &raw);
+    }
+    settings.api_keys = decrypted;
     settings
 }
 
@@ -114,23 +130,34 @@ pub fn save(path: &Path, settings: &Settings) -> std::io::Result<()> {
         .api_keys
         .iter()
         .filter(|(_, v)| !v.is_empty())
-        .map(|(id, plain)| (id.clone(), encrypt_key(plain)))
-        .collect();
+        .map(|(id, plain)| encrypt_key(plain).map(|encrypted| (id.clone(), encrypted)))
+        .collect::<std::io::Result<_>>()?;
     let json = serde_json::to_string_pretty(&on_disk)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     // Write-then-rename so a crash mid-write can't truncate a file full of
     // API keys.
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&tmp)?;
+    file.write_all(json.as_bytes())?;
+    file.sync_all()?;
+    drop(file);
     fs::rename(&tmp, path)
 }
 
-fn encrypt_key(plain: &str) -> String {
+fn encrypt_key(plain: &str) -> std::io::Result<String> {
     match secret::protect(plain.as_bytes()) {
-        Some(bytes) => format!("{SECRET_PREFIX}{}", base64_encode(&bytes)),
+        Some(bytes) => Ok(format!("{SECRET_PREFIX}{}", BASE64.encode(bytes))),
         // No DPAPI (non-Windows dev builds): store as-is so the round trip
         // still works. Windows always has it.
-        None => plain.to_string(),
+        None if !cfg!(target_os = "windows") => Ok(plain.to_string()),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "DPAPI refused to encrypt an API key; settings were not written",
+        )),
     }
 }
 
@@ -140,100 +167,46 @@ fn decrypt_key(value: &str) -> Option<String> {
         // before encryption existed. It gets re-encrypted on the next save.
         return Some(value.to_string());
     };
-    let bytes = base64_decode(encoded)?;
+    let bytes = BASE64.decode(encoded).ok()?;
     let plain = secret::unprotect(&bytes)?;
     String::from_utf8(plain).ok()
 }
 
-/// Default settings path: `%APPDATA%\Lumen Translation\settings.json`.
+/// Default settings path: `%APPDATA%\app.lumen.translation\settings.json`.
 pub fn default_path(app_data_dir: PathBuf) -> PathBuf {
     app_data_dir.join("settings.json")
-}
-
-// ---------------------------------------------------------------------------
-// Minimal base64 — small enough not to justify a dependency, and only ever
-// applied to DPAPI blobs.
-// ---------------------------------------------------------------------------
-
-const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-fn base64_encode(input: &[u8]) -> String {
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-        out.push(ALPHABET[(n >> 18) as usize & 63] as char);
-        out.push(ALPHABET[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            ALPHABET[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            ALPHABET[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-fn base64_decode(input: &str) -> Option<Vec<u8>> {
-    let mut acc: u32 = 0;
-    let mut bits = 0u32;
-    let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    for c in input.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            b'=' | b'\n' | b'\r' => continue,
-            _ => return None,
-        };
-        acc = (acc << 6) | v as u32;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((acc >> bits) as u8);
-        }
-    }
-    Some(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    #[test]
-    fn base64_round_trips_arbitrary_bytes() {
-        for len in 0..64usize {
-            let bytes: Vec<u8> = (0..len).map(|i| (i * 7 + 13) as u8).collect();
-            let encoded = base64_encode(&bytes);
-            assert_eq!(base64_decode(&encoded).as_deref(), Some(bytes.as_slice()));
-        }
+    static TEST_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn test_dir(name: &str) -> PathBuf {
+        let seq = TEST_SEQ.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "lumen-settings-{name}-{}-{seq}",
+            std::process::id()
+        ))
     }
 
     #[test]
-    fn base64_rejects_non_alphabet_input() {
-        assert!(base64_decode("not base64!").is_none());
+    fn invalid_encrypted_value_is_rejected() {
+        assert!(decrypt_key("dpapi:not base64!").is_none());
     }
 
     #[test]
     fn missing_file_yields_defaults() {
-        let dir = std::env::temp_dir().join("lumen-settings-missing");
+        let dir = test_dir("missing");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(load(&dir.join("settings.json")), Settings::default());
     }
 
     #[test]
     fn round_trips_through_disk_including_api_keys() {
-        let dir = std::env::temp_dir().join("lumen-settings-roundtrip");
+        let dir = test_dir("roundtrip");
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("settings.json");
 
@@ -255,6 +228,12 @@ mod tests {
         save(&path, &settings).expect("save");
         assert_eq!(load(&path), settings);
 
+        // A second write exercises replacement of an existing settings file,
+        // including Windows' rename semantics.
+        settings.target_lang = "ko".into();
+        save(&path, &settings).expect("replace existing settings");
+        assert_eq!(load(&path), settings);
+
         // The key must not be readable in the file on Windows, where DPAPI is
         // available. Elsewhere the fallback deliberately stores plaintext.
         let raw = std::fs::read_to_string(&path).expect("read");
@@ -267,7 +246,7 @@ mod tests {
 
     #[test]
     fn corrupt_file_falls_back_to_defaults_and_keeps_a_backup() {
-        let dir = std::env::temp_dir().join("lumen-settings-corrupt");
+        let dir = test_dir("corrupt");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("mkdir");
         let path = dir.join("settings.json");

@@ -8,7 +8,7 @@
 
 use windows::Win32::Foundation::{LocalFree, HLOCAL};
 use windows::Win32::Security::Cryptography::{
-    CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB,
+    CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
 };
 
 /// Description recorded inside the blob; shows up in DPAPI audit tooling.
@@ -37,7 +37,16 @@ pub fn protect(plain: &[u8]) -> Option<Vec<u8>> {
             pbData: plain.as_ptr() as *mut u8,
         };
         let mut output = CRYPT_INTEGER_BLOB::default();
-        CryptProtectData(&input, DESCRIPTION, None, None, None, 0, &mut output).ok()?;
+        CryptProtectData(
+            &input,
+            DESCRIPTION,
+            None,
+            None,
+            None,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+        .ok()?;
         Some(take_blob(&output))
     }
 }
@@ -51,7 +60,16 @@ pub fn unprotect(cipher: &[u8]) -> Option<Vec<u8>> {
             pbData: cipher.as_ptr() as *mut u8,
         };
         let mut output = CRYPT_INTEGER_BLOB::default();
-        CryptUnprotectData(&input, None, None, None, None, 0, &mut output).ok()?;
+        CryptUnprotectData(
+            &input,
+            None,
+            None,
+            None,
+            None,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+        .ok()?;
         Some(take_blob(&output))
     }
 }
