@@ -1,0 +1,168 @@
+name: Windows CI
+
+# The desktop app is the only part of the repo that needs a Windows runner:
+# everything else is platform-neutral TypeScript covered by ci.yml on Ubuntu.
+# Paths are filtered so a docs or extension change doesn't spend ten minutes
+# compiling Rust.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/desktop/**'
+      - 'packages/engines/**'
+      - 'packages/core/**'
+      - 'scripts/windows/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/ci-windows.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/desktop/**'
+      - 'packages/engines/**'
+      - 'packages/core/**'
+      - 'scripts/windows/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/ci-windows.yml'
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: Four-part Microsoft Store package version
+        required: false
+        default: '0.1.0.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build and test (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # @lumen/engines exposes types only via ./dist, so the desktop app can't
+      # typecheck until it is built.
+      - name: Build library packages
+        run: pnpm -r --filter "./packages/**" build
+
+      - name: Typecheck desktop frontend
+        run: pnpm --filter "@lumen/desktop" typecheck
+
+      - name: Test desktop frontend
+        run: pnpm --filter "@lumen/desktop" test
+
+      - name: Build desktop frontend
+        run: pnpm --filter "@lumen/desktop" build
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+        working-directory: apps/desktop/src-tauri
+
+      # The Windows-only modules — input hooks, UI Automation, DPAPI,
+      # clipboard — are compiled for the first time here. A macOS or Linux
+      # workstation only ever builds their fail-closed stubs.
+      - name: Lint Rust backend
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: apps/desktop/src-tauri
+
+      - name: Test Rust backend
+        run: cargo test
+        working-directory: apps/desktop/src-tauri
+
+      - name: Build NSIS installer
+        run: pnpm --filter "@lumen/desktop" tauri build --bundles nsis
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis-x64-${{ github.sha }}
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Build Microsoft Store MSIX
+        shell: pwsh
+        env:
+          STORE_IDENTITY_NAME: ${{ vars.WINDOWS_STORE_IDENTITY_NAME }}
+          STORE_PUBLISHER: ${{ vars.WINDOWS_STORE_PUBLISHER }}
+          STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.WINDOWS_STORE_PUBLISHER_DISPLAY_NAME }}
+          STORE_PACKAGE_VERSION: ${{ inputs.package_version }}
+        run: |
+          $storeValues = @(
+            $env:STORE_IDENTITY_NAME,
+            $env:STORE_PUBLISHER,
+            $env:STORE_PUBLISHER_DISPLAY_NAME
+          )
+          $hasStoreIdentity = ($storeValues | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_)
+          }).Count -eq $storeValues.Count
+
+          # A Store submission must carry the real Partner Center identity.
+          # Pull requests fall back to a development one so MakeAppx validation
+          # doesn't depend on private configuration.
+          if (-not $hasStoreIdentity -and '${{ github.event_name }}' -eq 'workflow_dispatch') {
+            throw "Set WINDOWS_STORE_IDENTITY_NAME, WINDOWS_STORE_PUBLISHER, and WINDOWS_STORE_PUBLISHER_DISPLAY_NAME as repository variables before building a Store submission package."
+          }
+
+          if (-not $hasStoreIdentity) {
+            $env:STORE_IDENTITY_NAME = 'LumenTranslation.Dev'
+            $env:STORE_PUBLISHER = 'CN=Lumen Translation Development, OID.2.25.269339209217466799157659632861705434293=1'
+            $env:STORE_PUBLISHER_DISPLAY_NAME = 'Lumen Translation Development'
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:STORE_PACKAGE_VERSION)) {
+            $tauri = Get-Content apps/desktop/src-tauri/tauri.conf.json | ConvertFrom-Json
+            $env:STORE_PACKAGE_VERSION = "$($tauri.version).0"
+          }
+
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+          ./scripts/windows/build-msix.ps1 `
+            -ExecutablePath apps/desktop/src-tauri/target/release/lumen-translation-desktop.exe `
+            -OutputPath "release-assets/Lumen-Translation-$($env:STORE_PACKAGE_VERSION)-windows-x64.msix" `
+            -Version $env:STORE_PACKAGE_VERSION `
+            -IdentityName $env:STORE_IDENTITY_NAME `
+            -Publisher $env:STORE_PUBLISHER `
+            -PublisherDisplayName $env:STORE_PUBLISHER_DISPLAY_NAME
+
+      - name: Upload Microsoft Store package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-store-msix-${{ github.sha }}
+          path: release-assets/*.msix
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
