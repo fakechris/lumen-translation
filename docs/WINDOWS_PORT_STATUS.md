@@ -22,18 +22,18 @@ side by side.
 
 The browser extension, userscript, mobile shell, worker, and every package
 under `packages/` are already platform-neutral TypeScript. The port is
-therefore about the *desktop* product, which on macOS is two pieces:
+therefore about the _desktop_ product, which on macOS is two pieces:
 
-| Piece | macOS | Windows |
-| --- | --- | --- |
-| Selection popup | PopClip extension (`apps/popclip`) | Built from scratch — see below |
-| Translation window | Swift/AppKit (`apps/popclip-window`) | Tauri v2 (`apps/desktop`) |
-| App ↔ popup IPC | AppleScript `translate` / `configure` verbs | Tauri commands and events |
-| Preferences storage | `UserDefaults` (plaintext keys) | JSON under `%APPDATA%`, keys encrypted with DPAPI |
-| Global hotkey | Carbon `RegisterEventHotKey` | `tauri-plugin-global-shortcut` |
-| Menu bar | `NSStatusItem` | Tray icon and menu |
-| Speak | `NSSpeechSynthesizer` | Web Speech API in WebView2 |
-| App icon | `.icns` via `swiftc` + `iconutil` | `.ico` via `tools/gen-windows-icons.mjs` |
+| Piece               | macOS                                       | Windows                                                                 |
+| ------------------- | ------------------------------------------- | ----------------------------------------------------------------------- |
+| Selection popup     | PopClip extension (`apps/popclip`)          | Built from scratch — see below                                          |
+| Translation window  | Swift/AppKit (`apps/popclip-window`)        | Tauri v2 (`apps/desktop`)                                               |
+| App ↔ popup IPC     | AppleScript `translate` / `configure` verbs | Tauri commands and events                                               |
+| Preferences storage | `UserDefaults` (plaintext keys)             | JSON under `%APPDATA%\app.lumen.translation`, keys encrypted with DPAPI |
+| Global hotkey       | Carbon `RegisterEventHotKey`                | `tauri-plugin-global-shortcut`                                          |
+| Menu bar            | `NSStatusItem`                              | Tray icon and menu                                                      |
+| Speak               | `NSSpeechSynthesizer`                       | Web Speech API in WebView2                                              |
+| App icon            | `.icns` via `swiftc` + `iconutil`           | `.ico` via `tools/gen-windows-icons.mjs`                                |
 
 ## Implemented
 
@@ -89,10 +89,12 @@ These are deliberate, and are candidates for back-porting:
 
 ## One workspace-wide change this port forced
 
-`package.json` gained a pnpm override:
+`pnpm-workspace.yaml` carries the workspace override (pnpm 10 no longer reads
+this setting from `package.json`):
 
-```json
-"pnpm": { "overrides": { "wxt>vite": "^8.1.5" } }
+```yaml
+overrides:
+  'wxt>vite': '^8.1.5'
 ```
 
 `wxt` depends on `vite: ^5.4.19 || ^6.3.4 || ^7.0.0 || ^8.0.0-0`, so which vite
@@ -125,9 +127,11 @@ is lost.
   in apps with no accessible text.
 - **x64 only.** An arm64 build is a bundle-target change, not a code change,
   but it is not part of this milestone.
-- **Both artefacts are unsigned.** SmartScreen warnings are expected on the
-  NSIS installer. The Store signs the MSIX after certification; direct
-  sideloading still needs a trusted signature.
+- **Both artefacts are unsigned.** The NSIS installer is a development preview,
+  not a trusted direct release. CI publishes `SHA256SUMS-windows.txt` and a
+  signed GitHub build-provenance attestation; production direct distribution
+  remains blocked on code signing. The Store signs the MSIX after certification;
+  direct sideloading still needs a trusted signature.
 - **Store review risk.** The MSIX declares nothing beyond `runFullTrust`, but
   a global keyboard hook is the kind of thing Store review asks about. The
   NSIS installer is the primary distribution channel.
@@ -141,7 +145,7 @@ Done on a macOS workstation:
 - `cargo clippy --all-targets` — clean.
 - `cargo fmt --all --check` — clean.
 - `cargo clippy --target x86_64-pc-windows-gnu --all-targets -- -D warnings`,
-  which type-checks the *whole* crate — including the Tauri glue in `lib.rs`
+  which type-checks the _whole_ crate — including the Tauri glue in `lib.rs`
   and `tray.rs` — for Windows without a Windows machine. `tauri-build` needs a
   resource compiler, and mingw-w64's `windres` (`brew install mingw-w64`) is
   one; only the MSVC target lacks it. This is the cheapest way to catch a
@@ -153,8 +157,8 @@ Done on a macOS workstation:
   behind `pub mod` an unused `pub use` is not a warning, and one such
   re-export is exactly what the first Windows CI run failed on.
 - `pnpm --filter @lumen/desktop typecheck` — clean.
-- `pnpm --filter @lumen/desktop test` — 47 passing (catalog, settings,
-  fallback chain).
+- `pnpm --filter @lumen/desktop test` — 52 passing (catalog, settings, HTTP
+  bridge routing, fallback chain).
 - `pnpm --filter @lumen/desktop build` — clean.
 
 ### Done on the Windows CI runner
@@ -163,7 +167,7 @@ Done on a macOS workstation:
 
 - `cargo clippy --all-targets -- -D warnings` — the first real compile of the
   Tauri glue, the tray, and the hotkey code.
-- `cargo test` — 22 passing, including the DPAPI and Win32 clipboard tests that
+- `cargo test` — 21 passing, including the DPAPI and Win32 clipboard tests that
   only execute on Windows.
 - `pnpm --filter @lumen/desktop tauri build --bundles nsis` produces
   `Lumen Translation_0.1.0_x64-setup.exe`.

@@ -13,6 +13,7 @@ apps/desktop/src-tauri/gen
 .env.local
 *.local
 coverage
+/release-assets/
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json

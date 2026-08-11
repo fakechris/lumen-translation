@@ -5,10 +5,12 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -187,8 +189,21 @@ jobs:
             -VersionTag $env:VERSION_TAG `
             -OutputDirectory release-assets
 
+      - name: Generate Windows checksum
+        shell: pwsh
+        run: |
+          $asset = Get-ChildItem release-assets/*-setup.exe -File -ErrorAction Stop |
+            Select-Object -First 1
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset.FullName).Hash.ToLowerInvariant()
+          "$hash  $($asset.Name)" | Set-Content release-assets/SHA256SUMS-windows.txt -Encoding ascii
+
+      - name: Attest Windows installer provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release-assets/*-setup.exe
+
       - name: Attach installer to release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/*-setup.exe
+          files: release-assets/*
           fail_on_unmatched_files: true

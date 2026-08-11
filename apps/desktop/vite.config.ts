@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from 'vite';
 
 // Three separate documents rather than one SPA with a router: each Tauri
 // window loads its own entry, so the always-on-top action bar stays a ~40 KB
@@ -16,27 +16,32 @@ export default defineConfig({
   plugins: [],
   // Tauri serves the built assets from a custom protocol, so asset URLs must
   // be relative.
-  base: "./",
+  base: './',
   clearScreen: false,
   server: {
     port: 1421,
     strictPort: true,
+    // Rust keeps loaded DLLs locked on Windows. Watching its build output can
+    // make Vite crash with EBUSY while `tauri dev` is linking the application.
+    watch: {
+      ignored: ['**/src-tauri/target/**'],
+    },
   },
   esbuild: {
-    jsx: "automatic",
+    jsx: 'automatic',
   },
   build: {
-    outDir: "dist",
-    target: "chrome105",
+    outDir: 'dist',
+    target: 'chrome105',
     emptyOutDir: true,
     // Relative to the Vite root, so this config needs no node built-ins and
     // therefore no @types/node — which would create a second peer-resolved
     // variant of vite 6 and shift resolution elsewhere in the workspace.
     rollupOptions: {
       input: {
-        translate: "index.html",
-        prefs: "prefs.html",
-        bar: "bar.html",
+        translate: 'index.html',
+        prefs: 'prefs.html',
+        bar: 'bar.html',
       },
     },
   },
