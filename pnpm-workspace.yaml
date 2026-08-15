@@ -1,4 +1,7 @@
 packages:
-  - "packages/*"
-  - "apps/*"
-  - "sites"
+  - 'packages/*'
+  - 'apps/*'
+  - 'sites'
+
+overrides:
+  'wxt>vite': '^8.1.5'
