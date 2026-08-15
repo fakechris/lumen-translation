@@ -28,6 +28,7 @@ swiftc \
   "${APP_NAME}/ProviderCatalog.swift" \
   "${APP_NAME}/Preferences.swift" \
   "${APP_NAME}/LLMService.swift" \
+  "${APP_NAME}/Languages.swift" \
   "${APP_NAME}/PreferencesWindow.swift"
 
 # Copy the scripting definition (AppleScript `translate` keyword).

@@ -233,6 +233,8 @@ Or download `Lumen.popclipextz` from the [latest release](https://github.com/fak
 
 Select text in any macOS app → click **Lumen** in the PopClip bar → the translation appears in the floating window. Switch engine / target language per selection from the PopClip extension's options, or manage everything from the app's **Settings**.
 
+The floating window has a Bob-style language bar at the top: pick the source language (auto-detect by default) or target language, or tap the ⇄ button to swap them — the text re-translates instantly with the new pair (the swap also uses the engine's auto-detected language when the source is on auto-detect).
+
 ### Windows desktop app
 
 Windows has no PopClip, so **Lumen Translation for Windows** (`apps/desktop`)
