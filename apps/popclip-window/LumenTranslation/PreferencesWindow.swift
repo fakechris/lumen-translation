@@ -325,14 +325,14 @@ struct GeneralTab: View {
       Section("Languages") {
         Picker("Source", selection: $sourceLang) {
           Text("Auto Detect").tag("auto")
-          ForEach(languageOptions, id: \.code) { l in
+          ForEach(LanguageCatalog.all, id: \.code) { l in
             Text(l.label).tag(l.code)
           }
         }
         .onChange(of: sourceLang) { _ in Preferences.shared.sourceLang = sourceLang }
 
         Picker("Target", selection: $targetLang) {
-          ForEach(languageOptions, id: \.code) { l in
+          ForEach(LanguageCatalog.all, id: \.code) { l in
             Text(l.label).tag(l.code)
           }
         }
@@ -453,31 +453,5 @@ extension ShapeStyle where Self == Color {
   }
 }
 
-// MARK: - Language options
-
-private struct LanguageOption {
-  let code: String
-  let label: String
-}
-
-private let languageOptions: [LanguageOption] = [
-  .init(code: "zh-CN", label: "中文（简体）"),
-  .init(code: "zh-TW", label: "中文（繁體）"),
-  .init(code: "en", label: "English"),
-  .init(code: "ja", label: "日本語"),
-  .init(code: "ko", label: "한국어"),
-  .init(code: "fr", label: "Français"),
-  .init(code: "de", label: "Deutsch"),
-  .init(code: "es", label: "Español"),
-  .init(code: "ru", label: "Русский"),
-  .init(code: "ar", label: "العربية"),
-  .init(code: "it", label: "Italiano"),
-  .init(code: "pt", label: "Português"),
-  .init(code: "th", label: "ไทย"),
-  .init(code: "vi", label: "Tiếng Việt"),
-  .init(code: "id", label: "Bahasa Indonesia"),
-  .init(code: "hi", label: "हिन्दी"),
-  .init(code: "tr", label: "Türkçe"),
-  .init(code: "nl", label: "Nederlands"),
-  .init(code: "pl", label: "Polski"),
-]
+// Shared language options live in Languages.swift (LanguageCatalog), used by
+// both this Settings window and the translate window's quick switcher.

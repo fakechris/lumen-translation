@@ -31,7 +31,11 @@ enum TranslationError: Error, CustomStringConvertible {
 }
 
 enum TranslationOutcome {
-  case success(String, engine: String)
+  /// `detectedLang` is the source language the engine auto-detected when the
+  /// requested source was "auto" (nil for explicit sources and for LLM
+  /// providers, which don't report detection). The translate window uses it
+  /// to make the language-swap button reverse the direction intelligently.
+  case success(String, engine: String, detectedLang: String?)
   case failure(String)
 }
 
@@ -145,8 +149,8 @@ final class TranslationService {
     let preset = chain[index]
     attemptOne(preset: preset, text: text, prefs: prefs) { [weak self] outcome in
       switch outcome {
-      case .success(let t, let engine):
-        completion(.success(t, engine: engine))
+      case .success(let t, let engine, let detected):
+        completion(.success(t, engine: engine, detectedLang: detected))
       case .failure(let e):
         let combined = "\(preset.label): \(e)"
         if index + 1 < chain.count {
@@ -206,10 +210,17 @@ final class TranslationService {
           return
         }
         let out = sentences.compactMap { $0.first as? String }.joined()
+        // The outer array's second element is the detected source language
+        // when the request asked for auto-detection (e.g. "en", "zh-CN").
+        var detected: String?
+        if source == "auto", arr.count > 1,
+           let d = arr[1] as? String, !d.isEmpty, !d.contains(" ") {
+          detected = d
+        }
         if out.isEmpty {
           completion(.failure("google: empty response"))
         } else {
-          completion(.success(out, engine: label))
+          completion(.success(out, engine: label, detectedLang: detected))
         }
       case .failure(let e):
         completion(.failure(e.description))
@@ -238,10 +249,18 @@ final class TranslationService {
           let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] ?? []
           let out = (arr.first?["translations"] as? [[String: Any]])?
             .compactMap { $0["text"] as? String }.joined() ?? ""
+          // When no `from` was sent, the response carries the detected
+          // source language: [{"detectedLanguage":{"language":"en",...},...}].
+          var detected: String?
+          if source == "auto",
+             let det = (arr.first?["detectedLanguage"] as? [String: Any])?["language"] as? String,
+             !det.isEmpty {
+            detected = det
+          }
           if out.isEmpty {
             completion(.failure("microsoft: empty response"))
           } else {
-            completion(.success(out, engine: label))
+            completion(.success(out, engine: label, detectedLang: detected))
           }
         } catch {
           completion(.failure("microsoft: \(error.localizedDescription)"))
@@ -330,7 +349,9 @@ final class TranslationService {
           if trimmed.isEmpty {
             completion(.failure("empty response"))
           } else {
-            completion(.success(trimmed, engine: preset.label))
+            // LLM providers don't report the detected source language, so the
+            // window's swap button falls back to its default in that case.
+            completion(.success(trimmed, engine: preset.label, detectedLang: nil))
           }
         } catch {
           completion(.failure(error.localizedDescription))

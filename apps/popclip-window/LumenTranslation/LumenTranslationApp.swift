@@ -126,12 +126,14 @@ final class TranslateCommand: NSScriptCommand {
     let sem = DispatchSemaphore(value: 0)
     var resultTranslation = ""
     var resultEngine = ""
+    var resultDetected: String?
     let prefs = Preferences.shared
     TranslationService.shared.translate(text: text) { outcome in
       switch outcome {
-      case .success(let t, let engine):
+      case .success(let t, let engine, let detected):
         resultTranslation = t
         resultEngine = engine
+        resultDetected = detected
       case .failure(let e):
         resultTranslation = "Lumen error: \(e)"
         resultEngine = "error"
@@ -143,7 +145,8 @@ final class TranslateCommand: NSScriptCommand {
     let payload = TranslationPayload(
       source: text, translation: resultTranslation,
       engine: resultEngine,
-      sourceLang: prefs.sourceLang, targetLang: prefs.targetLang)
+      sourceLang: prefs.sourceLang, targetLang: prefs.targetLang,
+      detectedLang: resultDetected)
     NSLog("[LumenTranslation] cmd about to show, isMain=\(Thread.isMainThread)")
     TranslateWindowController.shared.show(payload: payload)
     NSLog("[LumenTranslation] cmd returned from show")
@@ -199,6 +202,9 @@ struct TranslationPayload {
   var engine: String
   var sourceLang: String
   var targetLang: String
+  /// Engine-reported source language when the requested source was "auto"
+  /// (nil for explicit sources and LLM providers).
+  var detectedLang: String?
 }
 
 // MARK: - TranslateWindow : NSWindow
@@ -264,6 +270,12 @@ final class TranslateWindow: NSWindow {
 final class TranslateWindowController: NSWindowController, NSWindowDelegate {
   static let shared = TranslateWindowController()
 
+  // True while an NSMenu is being tracked (e.g. the language-selector popups
+  // in the window). Used to keep the window open when it momentarily resigns
+  // key status during menu tracking — otherwise the click that opens a popup
+  // would also close the window via windowDidResignKey.
+  static var menuTracking = false
+
   private var contentView: TranslateContentView?
   // Kept in memory so ⌥⌘L / "Show Last Translation" can re-open the window
   // with its previous source + translation after it's been closed.
@@ -296,6 +308,9 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
       w.contentView = cv
       w.delegate = self
       self.contentView = cv
+      // In-window language switches re-translate and can change the
+      // translation height, so the content asks us to re-fit the frame.
+      cv.onRefitNeeded = { [weak self] in self?.layoutWindow() }
       self.window = w
     }
     guard let w = self.window, let cv = self.contentView else {
@@ -307,9 +322,20 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
     // Activate the app first, then show.
     NSApp.activate(ignoringOtherApps: true)
 
-    // Width is fixed at 400. Height grows with content; the internal text
-    // views become scrollable only when text exceeds the available screen
-    // height. No artificial max height cap — it grows to ~530+ for long text.
+    layoutWindow()
+
+    showWindow(self)
+    w.makeKeyAndOrderFront(nil)
+    NSLog("[LumenTranslation] window after show frame=\(w.frame) isVisible=\(w.isVisible)")
+  }
+
+  // Recompute the window frame from the content's current text heights.
+  // Called when a new payload is shown and after an in-window language
+  // switch / swap, where the translation height can change. Width is fixed at
+  // 400; height grows with content and the internal text views scroll once
+  // text exceeds the available screen height.
+  private func layoutWindow() {
+    guard let w = self.window, let cv = self.contentView else { return }
     let width = 400
     cv.setTextContainerWidth(CGFloat(width - 32))
     let srcH = cv.sourceTextHeight
@@ -319,8 +345,9 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
     let maxSrc = min(srcH, screenH * 0.35)
     let maxTr = min(trH, screenH * 0.45)
     cv.setScrollHeights(source: maxSrc, translation: maxTr)
-    // Layout: 16 top + src + 12 + 1 (divider) + 12 + tr + 14 + 24 (button row) + 16 bottom
-    let height = max(240, 16 + maxSrc + 12 + 1 + 12 + maxTr + 14 + 24 + 16)
+    // Layout: 40 header (language bar) + src + 12 + 1 (divider) + 12 + tr
+    //         + 14 + 24 (button row) + 16 bottom
+    let height = max(280, 40 + maxSrc + 12 + 1 + 12 + maxTr + 14 + 24 + 16)
     NSLog("[LumenTranslation] height src=\(srcH) tr=\(trH) final=\(height)")
 
     if let screen = NSScreen.main {
@@ -333,10 +360,6 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
         to: screen)
       w.setFrame(f, display: true)
     }
-
-    showWindow(self)
-    w.makeKeyAndOrderFront(nil)
-    NSLog("[LumenTranslation] window after show frame=\(w.frame) isVisible=\(w.isVisible)")
   }
 
   // Re-open the most recent translation (⌥⌘L / status-menu item). Beeps if
@@ -352,7 +375,11 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
   // Close (hide) the window when the user clicks outside it. The window and
   // its content are retained (isReleasedWhenClosed = false), so the last
   // translation can be re-opened with ⌥⌘L.
+  // While a menu (e.g. the language popups) is being tracked the window may
+  // momentarily resign key status; don't close then, the selection is still
+  // in progress.
   func windowDidResignKey(_ notification: Notification) {
+    guard !TranslateWindowController.menuTracking else { return }
     window?.orderOut(nil)
   }
 }
@@ -371,10 +398,31 @@ final class TranslateContentView: NSView {
   private let speakButton = NSButton()
   private let closeButton = NSButton()
   private let divider = NSBox()
+  // Bob-style quick language switcher: [source ▾] ⇄ [target ▾].
+  private let sourceLangPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+  private let targetLangPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+  private let swapButton = NSButton()
   private var currentTranslation = ""
   private var copiedTimer: Timer?
   // Guards against recursive scroll sync.
   private var syncing = false
+  // Engine-reported source language for the currently shown text, used by the
+  // swap button to reverse auto-detect sources (nil when the source was
+  // explicit or the engine can't detect, e.g. LLM providers).
+  private var lastDetectedLang: String?
+  // Bumped per retranslate; stale async completions are ignored so a fast
+  // series of language switches always lands on the latest selection.
+  private var translateGeneration = 0
+  /// Called after an in-window language switch finishes re-translating so the
+  /// controller can re-fit the window height to the new result.
+  var onRefitNeeded: (() -> Void)?
+
+  // MARK: - Palette (Lumen "Atelier" warm parchment)
+
+  private static let warmSecondary =
+    NSColor(srgbRed: 0x71/255, green: 0x67/255, blue: 0x5d/255, alpha: 1)
+  private static let warmAccent =
+    NSColor(srgbRed: 0x9f/255, green: 0x4f/255, blue: 0x24/255, alpha: 1)
 
   // Force-generate glyphs for the current text at the given container width
   // so we can measure the real laid-out height.
@@ -506,9 +554,43 @@ final class TranslateContentView: NSView {
     speakButton.translatesAutoresizingMaskIntoConstraints = false
     speakButton.isBordered = false
 
+    // Quick language switcher ([source ▾] ⇄ [target ▾], Bob-style). The
+    // source popup lists auto-detect first; the target popup only concrete
+    // languages. Picking either re-translates immediately.
+    configureLangPopup(sourceLangPopup, options: LanguageCatalog.sourceOptions,
+                       tint: TranslateContentView.warmSecondary,
+                       action: #selector(sourceLangChanged))
+    configureLangPopup(targetLangPopup, options: LanguageCatalog.targetOptions,
+                       tint: TranslateContentView.warmAccent,
+                       action: #selector(targetLangChanged))
+
+    swapButton.image = NSImage(systemSymbolName: "arrow.left.arrow.right",
+                               accessibilityDescription: "Swap languages")
+    swapButton.imagePosition = .imageOnly
+    swapButton.isBordered = false
+    swapButton.bezelStyle = .inline
+    swapButton.contentTintColor = TranslateContentView.warmSecondary
+    swapButton.target = self
+    swapButton.action = #selector(swapAction)
+    swapButton.toolTip = "Swap source and target language"
+    swapButton.translatesAutoresizingMaskIntoConstraints = false
+
+    // Don't auto-close the window while a language menu is open: opening an
+    // NSPopUpButton menu can momentarily resign the window's key status, and
+    // windowDidResignKey otherwise hides the window mid-selection.
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(menuTrackingBegan),
+      name: NSMenu.didBeginTrackingNotification, object: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(menuTrackingEnded),
+      name: NSMenu.didEndTrackingNotification, object: nil)
+
     divider.boxType = .separator
     divider.translatesAutoresizingMaskIntoConstraints = false
 
+    addSubview(sourceLangPopup)
+    addSubview(swapButton)
+    addSubview(targetLangPopup)
     addSubview(sourceScrollView)
     addSubview(divider)
     addSubview(translationScrollView)
@@ -526,7 +608,20 @@ final class TranslateContentView: NSView {
     self.translationHeightC = trC
 
     NSLayoutConstraint.activate([
-      sourceScrollView.topAnchor.constraint(equalTo: topAnchor, constant: 28),
+      // Language switcher bar. The popups size to their titles; the target
+      // popup may not grow into the close button in the top-right corner.
+      sourceLangPopup.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+      sourceLangPopup.centerYAnchor.constraint(equalTo: topAnchor, constant: 21),
+
+      swapButton.leadingAnchor.constraint(equalTo: sourceLangPopup.trailingAnchor, constant: 4),
+      swapButton.centerYAnchor.constraint(equalTo: sourceLangPopup.centerYAnchor),
+      swapButton.widthAnchor.constraint(equalToConstant: 26),
+
+      targetLangPopup.leadingAnchor.constraint(equalTo: swapButton.trailingAnchor, constant: 4),
+      targetLangPopup.centerYAnchor.constraint(equalTo: sourceLangPopup.centerYAnchor),
+      targetLangPopup.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
+
+      sourceScrollView.topAnchor.constraint(equalTo: topAnchor, constant: 40),
       sourceScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
       sourceScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
       srcC,
@@ -560,11 +655,134 @@ final class TranslateContentView: NSView {
     ])
   }
 
+  // MARK: - Quick language switcher
+
+  private func configureLangPopup(_ popup: NSPopUpButton, options: [LanguageOption],
+                                  tint: NSColor, action: Selector) {
+    popup.isBordered = false
+    popup.bezelStyle = .inline
+    popup.font = .systemFont(ofSize: 12, weight: .medium)
+    popup.target = self
+    popup.action = action
+    popup.translatesAutoresizingMaskIntoConstraints = false
+    popup.menu?.removeAllItems()
+    let attrs: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+      .foregroundColor: tint,
+    ]
+    for opt in options {
+      let item = NSMenuItem(title: opt.label, action: nil, keyEquivalent: "")
+      item.representedObject = opt.code
+      item.attributedTitle = NSAttributedString(string: opt.label, attributes: attrs)
+      popup.menu?.addItem(item)
+    }
+  }
+
+  private func selectLang(_ popup: NSPopUpButton, code: String) {
+    let normalized = code.isEmpty ? LanguageCatalog.auto : code
+    for item in popup.menu?.items ?? [] {
+      if (item.representedObject as? String) == normalized {
+        popup.select(item)
+        return
+      }
+    }
+    popup.selectItem(at: 0)
+  }
+
+  @objc private func sourceLangChanged() {
+    guard let code = sourceLangPopup.selectedItem?.representedObject as? String else { return }
+    Preferences.shared.sourceLang = code
+    retranslateCurrent()
+  }
+
+  @objc private func targetLangChanged() {
+    guard let code = targetLangPopup.selectedItem?.representedObject as? String else { return }
+    Preferences.shared.targetLang = code
+    retranslateCurrent()
+  }
+
+  @objc private func swapAction() {
+    let prefs = Preferences.shared
+    let oldSource = prefs.sourceLang
+    let oldTarget = prefs.targetLang
+    // Reverse the pair: the old target becomes the explicit source, the old
+    // source becomes the target. When the source was auto-detect, use the
+    // language the engine detected for the current text so 中文→English
+    // reverses back to English→中文. Engines that don't report detection
+    // (LLM providers) fall back to English.
+    let newSource = oldTarget
+    let newTarget = oldSource == LanguageCatalog.auto
+      ? (lastDetectedLang ?? "en")
+      : oldSource
+    prefs.sourceLang = newSource
+    prefs.targetLang = newTarget
+    selectLang(sourceLangPopup, code: newSource)
+    selectLang(targetLangPopup, code: newTarget)
+    retranslateCurrent()
+  }
+
+  /// Re-run the translation with the currently selected languages and update
+  /// the result in place — the "instant" switch from Bob's window. Stale
+  /// completions from earlier switches are dropped via translateGeneration.
+  private func retranslateCurrent() {
+    let text = sourceTextView.string
+    guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    translateGeneration += 1
+    let gen = translateGeneration
+
+    engineLabel.isHidden = true
+    statusLabel.stringValue = "Translating…"
+    statusLabel.isHidden = false
+
+    TranslationService.shared.translate(text: text) { [weak self] outcome in
+      DispatchQueue.main.async {
+        guard let self = self, gen == self.translateGeneration else { return }
+        switch outcome {
+        case .success(let t, let engine, let detected):
+          self.translationTextView.string = t
+          self.currentTranslation = t
+          self.lastDetectedLang = detected
+          self.engineLabel.stringValue = engine
+        case .failure(let e):
+          // Show the message in the selectable translation area so it can be
+          // read and copied (e.g. "No API key set for X.").
+          self.translationTextView.string = "Lumen error: \(e)"
+          self.currentTranslation = ""
+          self.engineLabel.stringValue = "error"
+        }
+        self.engineLabel.isHidden = false
+        self.statusLabel.isHidden = true
+        self.needsLayout = true
+        self.onRefitNeeded?()
+      }
+    }
+  }
+
+  @objc private func menuTrackingBegan() {
+    TranslateWindowController.menuTracking = true
+  }
+
+  @objc private func menuTrackingEnded() {
+    TranslateWindowController.menuTracking = false
+  }
+
   func update(payload: TranslationPayload) {
     sourceTextView.string = payload.source
     translationTextView.string = payload.translation
     engineLabel.stringValue = payload.engine
     currentTranslation = payload.translation
+    lastDetectedLang = payload.detectedLang
+    // Keep the quick switcher and Preferences in sync with the payload
+    // (PopClip options or a re-shown last translation).
+    Preferences.shared.sourceLang = payload.sourceLang
+    Preferences.shared.targetLang = payload.targetLang
+    selectLang(sourceLangPopup, code: payload.sourceLang)
+    selectLang(targetLangPopup, code: payload.targetLang)
+    // A new payload supersedes any in-flight in-window re-translation.
+    translateGeneration += 1
+    copiedTimer?.invalidate()
+    statusLabel.isHidden = true
+    engineLabel.isHidden = false
     needsLayout = true
   }
 
