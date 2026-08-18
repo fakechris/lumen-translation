@@ -72,6 +72,26 @@ describe("buildUserMessage", () => {
     );
   });
 
+  it("excludes context that is already a segment in the batch", () => {
+    // In a contiguous batch, segment 2's context.prev is segment 1's text,
+    // which already appears in a [[1]] translation block. It should not be
+    // duplicated in the context block. Segment 1's context.prev ("Earlier
+    // paragraph.") comes from outside the batch and should be included.
+    const msg = buildUserMessage(
+      [
+        seg("1", "First paragraph in batch.", "Earlier paragraph."),
+        seg("2", "Second paragraph.", "First paragraph in batch."),
+      ],
+      undefined,
+    );
+    // Cross-batch context is included.
+    expect(msg).toContain("Earlier paragraph.");
+    // Segment 1's text appears once (in the [[1]] translation block), NOT
+    // twice (it must not also appear in the read-only context block).
+    const occurrences = msg.split("First paragraph in batch.").length - 1;
+    expect(occurrences).toBe(1);
+  });
+
   it("dedupes and truncates long context", () => {
     const longPrev = "x".repeat(1000);
     const msg = buildUserMessage(
