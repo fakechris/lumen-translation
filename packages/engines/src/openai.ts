@@ -404,6 +404,14 @@ const CONTEXT_CHAR_LIMIT = 400;
  * Collect unique `context.prev` snippets from the batch, in order. These give
  * the model cross-paragraph continuity (terminology, names, tone) without
  * asking it to translate anything but the batch itself.
+ *
+ * Context that is already visible as a segment's text in this batch is
+ * skipped: in a contiguous batch, only the first segment's `context.prev`
+ * comes from outside the batch; every subsequent segment's `context.prev` is
+ * the previous segment's text, which already appears in a `[[n]]` translation
+ * block. Including it again would duplicate source text in both the
+ * read-only context block and the translation blocks, wasting tokens and
+ * risking model confusion.
  */
 function collectContext(segments: Segment[]): string {
   const seen = new Set<string>();
@@ -411,6 +419,9 @@ function collectContext(segments: Segment[]): string {
   for (const seg of segments) {
     const prev = seg.context?.prev?.trim();
     if (!prev || seen.has(prev)) continue;
+    // Skip context whose text is already a segment in this batch (e.g. the
+    // previous paragraph is also being translated here).
+    if (segments.some((s) => s.text.includes(prev))) continue;
     seen.add(prev);
     parts.push(truncateMiddle(prev, CONTEXT_CHAR_LIMIT));
   }
