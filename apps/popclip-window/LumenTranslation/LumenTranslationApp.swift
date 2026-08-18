@@ -140,8 +140,10 @@ final class TranslateCommand: NSScriptCommand {
       }
       sem.signal()
     }
-    // Allow enough time for the fallback chain (primary + free MT + LLM).
-    _ = sem.wait(timeout: .now() + 60)
+    // Allow enough time for the fallback chain (primary + free MT + LLM) on
+    // a long, chunked selection — a full document can take a couple of
+    // minutes across several requests, especially with slow reasoning models.
+    _ = sem.wait(timeout: .now() + 300)
     let payload = TranslationPayload(
       source: text, translation: resultTranslation,
       engine: resultEngine,

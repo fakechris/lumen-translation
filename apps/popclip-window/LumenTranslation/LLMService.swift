@@ -7,6 +7,14 @@
 // an API key set. The first provider that succeeds wins, and its label is
 // reported back so the window shows which engine produced the result.
 //
+// Long selections (a 17 KB markdown file, say) are split into chunks of at
+// most CHUNK_MAX_CHARS characters on paragraph boundaries, translated in
+// order per provider, and joined back with blank lines so paragraph structure
+// survives. LLM providers receive the previous chunk's translation as
+// read-only context, so names and terminology stay consistent across chunk
+// boundaries. Without this, a full-length translation takes tens of seconds
+// for one request and blows the per-request timeout.
+//
 // PopClip action -> TranslateCommand -> TranslationService.translate(...).
 
 import Foundation
@@ -100,16 +108,20 @@ final class TranslationService {
 
   init() {
     let cfg = URLSessionConfiguration.default
-    cfg.timeoutIntervalForRequest = 30
-    cfg.timeoutIntervalForResource = 60
+    // Generous ceilings: long selections are chunked, but each chunk can
+    // still take tens of seconds on a slow reasoning model, and the MT
+    // fallbacks retry on 429/5xx within these bounds.
+    cfg.timeoutIntervalForRequest = 60
+    cfg.timeoutIntervalForResource = 180
     cfg.httpAdditionalHeaders = ["User-Agent": "LumenTranslation/0.1"]
     session = URLSession(configuration: cfg)
   }
 
   func translate(text: String, completion: @escaping (TranslationOutcome) -> Void) {
     let prefs = Preferences.shared
+    let chunks = TranslationService.chunkForTranslation(text)
     let chain = fallbackChain(prefs: prefs)
-    attempt(chain: chain, index: 0, text: text, prefs: prefs,
+    attempt(chain: chain, index: 0, chunks: chunks, prefs: prefs,
             lastError: "no translation provider available", completion: completion)
   }
 
@@ -139,7 +151,7 @@ final class TranslationService {
 
   /// Try providers in order, moving to the next on any failure and reporting
   /// the last error if all of them fail.
-  private func attempt(chain: [ProviderPreset], index: Int, text: String,
+  private func attempt(chain: [ProviderPreset], index: Int, chunks: [String],
                        prefs: Preferences, lastError: String,
                        completion: @escaping (TranslationOutcome) -> Void) {
     guard index < chain.count else {
@@ -147,7 +159,7 @@ final class TranslationService {
       return
     }
     let preset = chain[index]
-    attemptOne(preset: preset, text: text, prefs: prefs) { [weak self] outcome in
+    attemptOne(preset: preset, chunks: chunks, prefs: prefs) { [weak self] outcome in
       switch outcome {
       case .success(let t, let engine, let detected):
         completion(.success(t, engine: engine, detectedLang: detected))
@@ -156,26 +168,42 @@ final class TranslationService {
         if index + 1 < chain.count {
           NSLog("[LumenTranslation] \(preset.id) failed (\(e)); falling back to \(chain[index + 1].id)")
         }
-        self?.attempt(chain: chain, index: index + 1, text: text, prefs: prefs,
+        self?.attempt(chain: chain, index: index + 1, chunks: chunks, prefs: prefs,
                       lastError: combined, completion: completion)
       }
     }
   }
 
-  /// Route a single provider to its wire format. The two free MT engines have
-  /// dedicated formats; everything else is OpenAI-compatible chat.
-  private func attemptOne(preset: ProviderPreset, text: String, prefs: Preferences,
+  /// Route a whole (possibly chunked) selection through one provider. The two
+  /// free MT engines get plain per-chunk calls; LLM providers additionally
+  /// receive cross-chunk context. A failing chunk fails the provider, so the
+  /// fallback chain moves on honestly instead of silently dropping the tail
+  /// of the document.
+  private func attemptOne(preset: ProviderPreset, chunks: [String], prefs: Preferences,
                           completion: @escaping (TranslationOutcome) -> Void) {
+    let label = preset.label
     switch preset.apiStyle {
     case "google_translate":
-      googleTranslate(endpoint: prefs.endpoint(for: preset), label: preset.label, text: text,
-                      source: prefs.sourceLang, target: prefs.targetLang, completion: completion)
+      let endpoint = prefs.endpoint(for: preset)
+      translateChunks(chunks, withContext: false, engineLabel: label) { input, done in
+        self.googleTranslate(endpoint: endpoint, label: label, text: input.text,
+                             source: prefs.sourceLang, target: prefs.targetLang,
+                             completion: done)
+      } completion: { outcome in
+        completion(outcome)
+      }
     case "microsoft_translator":
-      microsoftTranslate(endpoint: prefs.endpoint(for: preset), label: preset.label, text: text,
-                         source: prefs.sourceLang, target: prefs.targetLang, completion: completion)
+      let endpoint = prefs.endpoint(for: preset)
+      translateChunks(chunks, withContext: false, engineLabel: label) { input, done in
+        self.microsoftTranslate(endpoint: endpoint, label: label, text: input.text,
+                                source: prefs.sourceLang, target: prefs.targetLang,
+                                completion: done)
+      } completion: { outcome in
+        completion(outcome)
+      }
     default:
       openAICompatibleTranslate(
-        text: text,
+        chunks: chunks,
         preset: preset,
         apiKey: prefs.apiKey(for: preset.id),
         model: prefs.model(for: preset.id),
@@ -271,10 +299,172 @@ final class TranslationService {
     }
   }
 
+  // MARK: - Long-text chunking
+
+  /// Split a long selection into order-preserving chunks of at most
+  /// `maxChars` characters on paragraph boundaries (blank lines). A
+  /// paragraph that is itself over the cap is hard-split on sentence
+  /// boundaries, then word boundaries, then a final hard cut (e.g. a single
+  /// giant code block). Chunk seams align with the `"\n\n"` separator the
+  /// caller uses to join results, so paragraph structure survives
+  /// round-trips whenever no hard split was needed. Empty paragraphs
+  /// (double blank lines) are spacing inside the surrounding chunk and do
+  /// not become seams. Internal (not private) so the smoke test can pin it.
+  static func chunkForTranslation(_ text: String, maxChars: Int = 3000) -> [String] {
+    if text.count <= maxChars { return [text] }
+    var chunks: [String] = []
+    var current = ""
+    for paragraph in text.components(separatedBy: "\n\n") {
+      if paragraph.isEmpty { continue }
+      if current.isEmpty {
+        current = paragraph
+      } else if current.count + paragraph.count + 2 <= maxChars {
+        current += "\n\n" + paragraph
+      } else {
+        chunks.append(current)
+        current = paragraph
+      }
+    }
+    if !current.isEmpty { chunks.append(current) }
+    return chunks.flatMap {
+      $0.count <= maxChars ? [$0] : splitOverlongPiece($0, maxChars: maxChars)
+    }
+  }
+
+  private static func splitOverlongPiece(_ piece: String, maxChars: Int) -> [String] {
+    var sentences: [String] = []
+    piece.enumerateSubstrings(in: piece.startIndex..<piece.endIndex,
+                              options: [.bySentences]) { sentence, _, _, _ in
+      if let sentence { sentences.append(sentence) }
+    }
+    if sentences.isEmpty { sentences = [piece] }
+    var chunks: [String] = []
+    var current = ""
+    for sentence in sentences {
+      if current.isEmpty {
+        current = sentence
+      } else if current.count + sentence.count <= maxChars {
+        current += sentence
+      } else {
+        chunks.append(current)
+        current = sentence
+      }
+    }
+    if !current.isEmpty { chunks.append(current) }
+    return chunks.flatMap {
+      $0.count <= maxChars ? [$0] : wrapAtWordBoundaries($0, maxChars: maxChars)
+    }
+  }
+
+  private static func wrapAtWordBoundaries(_ chunk: String, maxChars: Int) -> [String] {
+    var wrapped: [String] = []
+    var buffer = ""
+    for word in chunk.split(separator: " ") {
+      let w = String(word)
+      if buffer.isEmpty {
+        buffer = w
+      } else if buffer.count + w.count + 1 <= maxChars {
+        buffer += " " + w
+      } else {
+        wrapped.append(buffer)
+        buffer = w
+      }
+    }
+    if !buffer.isEmpty { wrapped.append(buffer) }
+    return wrapped.flatMap {
+      $0.count <= maxChars ? [$0] : hardCut($0, maxChars: maxChars)
+    }
+  }
+
+  private static func hardCut(_ s: String, maxChars: Int) -> [String] {
+    var out: [String] = []
+    var start = s.startIndex
+    while start < s.endIndex {
+      let end = s.index(start, offsetBy: maxChars, limitedBy: s.endIndex) ?? s.endIndex
+      out.append(String(s[start..<end]))
+      start = end
+    }
+    return out
+  }
+
+  /// One chunk being prepared for the network, plus the carry-over needed for
+  /// consistency: the previous chunk's translation (LLM providers only) and
+  /// the chunk's position in the sequence, used by `userContent`.
+  private struct ChunkInput {
+    let text: String
+    let previousTranslation: String?
+    let index: Int
+    let count: Int
+  }
+
+  /// Translate `chunks` in order with `single`, joining results with blank
+  /// lines so paragraph structure survives splitting. Any chunk failure
+  /// fails the whole provider — a partial translation would silently drop
+  /// the tail of the document, and the fallback chain should move on
+  /// honestly instead. When `withContext` is true, each chunk after the
+  /// first receives the previous chunk's translation (see `ChunkInput`),
+  /// which LLM providers use for terminology consistency. The engine's
+  /// detected source language is taken from the first chunk.
+  private func translateChunks(
+    _ chunks: [String],
+    withContext: Bool,
+    engineLabel: String,
+    single: @escaping (ChunkInput, @escaping (TranslationOutcome) -> Void) -> Void,
+    completion: @escaping (TranslationOutcome) -> Void
+  ) {
+    var parts: [String] = []
+    var detectedLang: String?
+    func step(_ i: Int, _ previous: String?) {
+      guard i < chunks.count else {
+        let joined = parts.joined(separator: "\n\n")
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+        if joined.isEmpty {
+          completion(.failure("empty response"))
+        } else {
+          completion(.success(joined, engine: engineLabel, detectedLang: detectedLang))
+        }
+        return
+      }
+      let input = ChunkInput(text: chunks[i], previousTranslation: previous,
+                             index: i, count: chunks.count)
+      single(input) { outcome in
+        switch outcome {
+        case .success(let t, _, let d):
+          parts.append(t)
+          if detectedLang == nil { detectedLang = d }
+          step(i + 1, withContext ? t : nil)
+        case .failure(let e):
+          completion(.failure(e))
+        }
+      }
+    }
+    step(0, nil)
+  }
+
+  /// User message for one chunk of a split long text. Single-chunk texts
+  /// (the normal PopClip case) go through verbatim. For multi-chunk texts,
+  /// parts after the first add a part counter and the previous part's
+  /// translation as read-only context, and the chunk to translate is
+  /// delimited so the model translates exactly that block — the context
+  /// must never leak into the output (the system prompt also demands
+  /// "return only the translation").
+  private static func userContent(for input: ChunkInput) -> String {
+    guard input.count > 1 else { return input.text }
+    let prefix = "This is part \(input.index + 1) of \(input.count). "
+    if let previous = input.previousTranslation, !previous.isEmpty {
+      return prefix
+        + "For consistency, here is my translation of the previous part (do not re-translate or repeat it):\n"
+        + previous.prefix(1200)
+        + "\n\n--- Text to translate ---\n"
+        + input.text
+    }
+    return prefix + "Translate the text below.\n\n--- Text to translate ---\n" + input.text
+  }
+
   // MARK: - OpenAI-compatible chat completions (used by all LLM providers)
 
   private func openAICompatibleTranslate(
-    text: String,
+    chunks: [String],
     preset: ProviderPreset,
     apiKey: String,
     model: String,
@@ -304,61 +494,67 @@ final class TranslationService {
       .replacingOccurrences(of: "{TARGET_LABEL}", with: targetLabel)
       .replacingOccurrences(of: "{SOURCE_HINT}", with: sourceHint)
 
-    var req = URLRequest(url: url)
-    req.httpMethod = "POST"
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    if preset.needsKey {
-      req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    }
-    for (k, v) in preset.extraHeaders {
-      req.setValue(v, forHTTPHeaderField: k)
-    }
-    req.timeoutInterval = 30
-
-    var body: [String: Any] = [
-      "model": model,
-      "temperature": 0.3,
-      "messages": [
-        ["role": "system", "content": system],
-        ["role": "user", "content": text],
-      ],
-    ]
-    // Data-driven "disable thinking" injection (catalog quirks.no_thinking):
-    // reasoning models (e.g. MiniMax-M3, deepseek-reasoner) otherwise emit
-    // chain-of-thought tokens, which slows translation down and wastes
-    // tokens. Mirrors createProviderEngine in packages/engines/providers.ts.
-    if let noThinking = preset.noThinkingInjection(for: model) {
-      for (k, v) in noThinking { body[k] = v }
-    }
-    req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-    runRequest(req) { result in
-      switch result {
-      case .success(let data):
-        do {
-          let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-          if let err = json["error"] as? [String: Any], let msg = err["message"] as? String {
-            // The fallback driver (`attempt`) prefixes the provider label, so
-            // provider-internal messages stay label-free to avoid duplication.
-            completion(.failure(msg))
-            return
-          }
-          let choices = json["choices"] as? [[String: Any]] ?? []
-          let content = (choices.first?["message"] as? [String: Any])?["content"] as? String ?? ""
-          let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-          if trimmed.isEmpty {
-            completion(.failure("empty response"))
-          } else {
-            // LLM providers don't report the detected source language, so the
-            // window's swap button falls back to its default in that case.
-            completion(.success(trimmed, engine: preset.label, detectedLang: nil))
-          }
-        } catch {
-          completion(.failure(error.localizedDescription))
-        }
-      case .failure(let e):
-        completion(.failure(e.description))
+    translateChunks(chunks, withContext: true, engineLabel: preset.label) { input, done in
+      var body: [String: Any] = [
+        "model": model,
+        "temperature": 0.3,
+        "messages": [
+          ["role": "system", "content": system],
+          ["role": "user", "content": TranslationService.userContent(for: input)],
+        ],
+      ]
+      // Data-driven "disable thinking" injection (catalog quirks.no_thinking):
+      // reasoning models (e.g. MiniMax-M3, deepseek-reasoner) otherwise emit
+      // chain-of-thought tokens, which slows translation down and wastes
+      // tokens. Mirrors createProviderEngine in packages/engines/providers.ts.
+      if let noThinking = preset.noThinkingInjection(for: model) {
+        for (k, v) in noThinking { body[k] = v }
       }
+
+      var req = URLRequest(url: url)
+      req.httpMethod = "POST"
+      req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      if preset.needsKey {
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+      }
+      for (k, v) in preset.extraHeaders {
+        req.setValue(v, forHTTPHeaderField: k)
+      }
+      // 3 KB chunks still take tens of seconds end-to-end on reasoning
+      // models; the old 30 s cap is what failed on long selections.
+      req.timeoutInterval = 120
+      req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+      self.runRequest(req) { result in
+        switch result {
+        case .success(let data):
+          do {
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            if let err = json["error"] as? [String: Any], let msg = err["message"] as? String {
+              // The fallback driver (`attempt`) prefixes the provider label, so
+              // provider-internal messages stay label-free to avoid duplication.
+              done(.failure(msg))
+              return
+            }
+            let choices = json["choices"] as? [[String: Any]] ?? []
+            let content = (choices.first?["message"] as? [String: Any])?["content"] as? String ?? ""
+            let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+              done(.failure("empty response"))
+            } else {
+              // LLM providers don't report the detected source language, so the
+              // window's swap button falls back to its default in that case.
+              done(.success(trimmed, engine: preset.label, detectedLang: nil))
+            }
+          } catch {
+            done(.failure(error.localizedDescription))
+          }
+        case .failure(let e):
+          done(.failure(e.description))
+        }
+      }
+    } completion: { outcome in
+      completion(outcome)
     }
   }
 
