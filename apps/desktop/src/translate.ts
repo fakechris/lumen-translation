@@ -58,6 +58,93 @@ or a preamble.`;
 
 const TEMPERATURE = 0.3;
 
+/**
+ * Long selections are split into order-preserving chunks of at most
+ * `maxChars` characters on paragraph boundaries (blank lines) before they
+ * reach a provider. Without this a 17 KB document becomes one request whose
+ * full-length generation blows the engine's request timeout. Mirrors
+ * `chunkForTranslation` in the macOS app (`LLMService.swift`).
+ */
+export const CHUNK_MAX_CHARS = 3000;
+
+export function chunkText(text: string, maxChars: number = CHUNK_MAX_CHARS): string[] {
+  if (text.length <= maxChars) return [text];
+  const paragraphs = text.split('\n\n');
+  const chunks: string[] = [];
+  let current = '';
+  for (const paragraph of paragraphs) {
+    if (paragraph.length === 0) continue;
+    if (current.length === 0) current = paragraph;
+    else if (current.length + paragraph.length + 2 <= maxChars) current += '\n\n' + paragraph;
+    else {
+      chunks.push(current);
+      current = paragraph;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.flatMap((c) => (c.length <= maxChars ? [c] : splitOverlong(c, maxChars)));
+}
+
+/** Hard-split an over-long paragraph (e.g. a single code block) on lines, then words. */
+function splitOverlong(piece: string, maxChars: number): string[] {
+  const lines = piece.split('\n');
+  const out: string[] = [];
+  let buffer = '';
+  for (const line of lines) {
+    if (!buffer) buffer = line;
+    else if (buffer.length + line.length + 1 <= maxChars) buffer += '\n' + line;
+    else {
+      out.push(buffer);
+      buffer = line;
+    }
+  }
+  if (buffer) out.push(buffer);
+  return out.flatMap((c) => (c.length <= maxChars ? [c] : wrapWords(c, maxChars)));
+}
+
+function wrapWords(chunk: string, maxChars: number): string[] {
+  const words = chunk.split(/(\s+)/);
+  const out: string[] = [];
+  let buffer = '';
+  for (const word of words) {
+    if (word.length === 0) continue;
+    if (!buffer) buffer = word;
+    else if (buffer.length + word.length <= maxChars) buffer += word;
+    else {
+      out.push(buffer);
+      buffer = word;
+    }
+  }
+  if (buffer) out.push(buffer);
+  return out.flatMap((c) => (c.length <= maxChars ? [c] : hardCut(c, maxChars)));
+}
+
+function hardCut(str: string, maxChars: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < str.length; i += maxChars) out.push(str.slice(i, i + maxChars));
+  return out;
+}
+
+/**
+ * User message for one chunk of a split long selection. Single-chunk texts
+ * go through verbatim; later chunks carry the previous chunk's translation
+ * as read-only context so names and terminology stay consistent, and the
+ * chunk to translate is delimited so the context never leaks into output.
+ */
+export function chunkUserContent(
+  text: string,
+  previousTranslation: string | undefined,
+  index: number,
+  count: number,
+): string {
+  if (count <= 1) return text;
+  const prefix = `This is part ${index + 1} of ${count}. `;
+  if (previousTranslation) {
+    return `${prefix}For consistency, here is my translation of the previous part (do not re-translate or repeat it):\n${previousTranslation.slice(0, 1200)}\n\n--- Text to translate ---\n${text}`;
+  }
+  return `${prefix}Translate the text below.\n\n--- Text to translate ---\n${text}`;
+}
+
 export interface TranslationResult {
   translation: string;
   /** Label of the provider that actually produced the result. */
@@ -140,33 +227,48 @@ function engineFor(preset: ProviderPreset, s: Settings): Engine {
 
 async function attemptOne(
   preset: ProviderPreset,
-  text: string,
+  chunks: string[],
   s: Settings,
   opts: TranslateOptions,
 ): Promise<string> {
   const engine = engineFor(preset, s);
-  const req = {
-    pair: { source: s.sourceLang, target: s.targetLang },
-    segments: [{ id: '0', text }],
-  };
+  // Only LLM providers carry the previous chunk's translation as context;
+  // the free MT engines translate each chunk verbatim.
+  const hasContext =
+    preset.apiStyle !== 'google_translate' && preset.apiStyle !== 'microsoft_translator';
+  const parts: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    if (opts.signal?.aborted) throw new TranslationFailed('aborted');
+    const text = hasContext
+      ? chunkUserContent(chunks[i], i > 0 ? parts[i - 1] : undefined, i, chunks.length)
+      : chunks[i];
+    const req = {
+      pair: { source: s.sourceLang, target: s.targetLang },
+      segments: [{ id: String(i), text }],
+    };
 
-  // Stream when the provider supports it so long passages appear progressively
-  // instead of after a 20 s wait.
-  if (opts.onPartial && engine.translateStream) {
-    let last = '';
-    for await (const seg of engine.translateStream(req)) {
-      last = seg.text;
-      opts.onPartial(last, preset.label);
+    // Stream when the provider supports it so long passages appear
+    // progressively instead of after a 20 s wait. The cumulative result
+    // (previous chunks + this chunk's partial) is what a user sees.
+    if (opts.onPartial && engine.translateStream) {
+      let last = '';
+      for await (const seg of engine.translateStream(req)) {
+        last = seg.text;
+        opts.onPartial([...parts, last].join('\n\n'), preset.label);
+      }
+      const out = last.trim();
+      if (!out) throw new TranslationFailed('empty response');
+      parts.push(out);
+    } else {
+      const res = await engine.translate(req);
+      const out = (res.segments[0]?.text ?? '').trim();
+      if (!out) throw new TranslationFailed('empty response');
+      parts.push(out);
     }
-    const out = last.trim();
-    if (!out) throw new TranslationFailed('empty response');
-    return out;
   }
-
-  const res = await engine.translate(req);
-  const out = (res.segments[0]?.text ?? '').trim();
-  if (!out) throw new TranslationFailed('empty response');
-  return out;
+  const joined = parts.join('\n\n').trim();
+  if (!joined) throw new TranslationFailed('empty response');
+  return joined;
 }
 
 /**
@@ -180,12 +282,13 @@ export async function translate(
 ): Promise<TranslationResult> {
   const chain = fallbackChain(s);
   const truncated = text.length > s.maxSelectionChars ? text.slice(0, s.maxSelectionChars) : text;
+  const chunks = chunkText(truncated);
   let lastError = 'no translation provider available';
 
   for (const preset of chain) {
     if (opts.signal?.aborted) throw new TranslationFailed('aborted');
     try {
-      const translation = await attemptOne(preset, truncated, s, opts);
+      const translation = await attemptOne(preset, chunks, s, opts);
       return { translation, engine: preset.label };
     } catch (err) {
       lastError = `${preset.label}: ${(err as Error).message}`;
