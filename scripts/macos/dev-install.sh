@@ -33,7 +33,7 @@ pnpm install --silent
 pnpm build
 
 echo "==> building release bundle (tauri)"
-pnpm tauri build 2>&1 | tail -5
+pnpm tauri build --bundles app 2>&1 | tail -5
 if [[ ! -d "$APP_SRC" ]]; then
   echo "ERROR: bundle not produced at: $APP_SRC" >&2
   exit 1
