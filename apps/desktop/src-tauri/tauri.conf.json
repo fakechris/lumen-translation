@@ -20,7 +20,9 @@
   "plugins": {},
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -28,18 +30,26 @@
       "icons/icon.ico"
     ],
     "resources": [],
-    "copyright": "Copyright © Lumen Translation contributors",
+    "copyright": "Copyright \u00a9 Lumen Translation contributors",
     "category": "Productivity",
     "shortDescription": "Bilingual translation, one selection away.",
-    "longDescription": "Select text anywhere in Windows and Lumen offers a translation — the PopClip workflow from macOS, rebuilt natively. Free Google/Microsoft engines out of the box, plus OpenAI-compatible LLM providers.",
+    "longDescription": "Select text anywhere in Windows and Lumen offers a translation \u2014 the PopClip workflow from macOS, rebuilt natively. Free Google/Microsoft engines out of the box, plus OpenAI-compatible LLM providers.",
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["English", "SimpChinese"],
+        "languages": [
+          "English",
+          "SimpChinese"
+        ],
         "displayLanguageSelector": true
+      }
+    },
+    "macOS": {
+      "infoPlist": {
+        "NSAudioCaptureUsageDescription": "Lumen taps the audio of the app you choose to generate live subtitles. Audio is processed on-device and never uploaded."
       }
     }
   }
