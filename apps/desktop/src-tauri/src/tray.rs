@@ -96,6 +96,8 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )?
     };
 
+    //  is only consumed by the macOS live-caption branch below.
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut menu = MenuBuilder::new(app)
         .item(&translate)
         .item(&show_last)

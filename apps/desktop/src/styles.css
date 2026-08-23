@@ -431,5 +431,7 @@ button:focus-visible {
 .caption-line {
   color: #fff; font-size: 26px; line-height: 1.35; text-align: center;
 }
-.caption-line.partial { color: rgba(255, 255, 255, 0.65); font-style: italic; }
-.caption-line:nth-child(1) { opacity: 0.5; font-size: 20px; }
+.caption-line.partial { color: rgba(255, 255, 255, 0.65); font-style: italic; font-size: 18px; }
+.caption-block + .caption-block { opacity: 0.55; }
+.caption-line.translation { font-size: 26px; font-weight: 500; }
+.caption-line.original { font-size: 19px; color: rgba(255, 255, 255, 0.75); }
