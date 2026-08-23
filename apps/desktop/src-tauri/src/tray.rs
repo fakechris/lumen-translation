@@ -86,7 +86,14 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     #[cfg(target_os = "macos")]
     let live_caption = {
         let running = app.state::<AppState>().caption.is_running();
-        CheckMenuItem::with_id(app, ID_LIVE_CAPTION, "实时字幕 (Live Subtitles)", true, running, None::<&str>)?
+        CheckMenuItem::with_id(
+            app,
+            ID_LIVE_CAPTION,
+            "实时字幕 (Live Subtitles)",
+            true,
+            running,
+            None::<&str>,
+        )?
     };
 
     let mut menu = MenuBuilder::new(app)
@@ -99,10 +106,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     {
         menu = menu.item(&live_caption).separator();
     }
-    menu.item(&preferences)
-        .separator()
-        .item(&quit)
-        .build()
+    menu.item(&preferences).separator().item(&quit).build()
 }
 
 /// Re-render the tray menu, e.g. after the engine list or selection changed.

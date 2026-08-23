@@ -404,9 +404,10 @@ fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
     let frontmost = lumen_platform_macos::frontmost_app().ok_or(
         "no frontmost app to tap — switch to the video (browser/player) first, then start",
     )?;
-    let bundle_id = frontmost.bundle_id.clone().ok_or(
-        "frontmost app has no bundle id; cannot target it for an audio tap",
-    )?;
+    let bundle_id = frontmost
+        .bundle_id
+        .clone()
+        .ok_or("frontmost app has no bundle id; cannot target it for an audio tap")?;
     // Never tap ourselves: the caption overlay would transcribe its own UI.
     if bundle_id.to_ascii_lowercase().contains("lumen") {
         return Err("frontmost app is Lumen itself; switch to the video first".into());
@@ -418,7 +419,9 @@ fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
     };
 
     let state = app.state::<AppState>();
-    state.caption.start(app.clone(), bundle_id.clone(), app_name.clone())?;
+    state
+        .caption
+        .start(app.clone(), bundle_id.clone(), app_name.clone())?;
     show_caption_window(&app, &app_name);
     let _ = app.emit("caption-started", &app_name);
     Ok(())

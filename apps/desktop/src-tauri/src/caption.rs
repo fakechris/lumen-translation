@@ -114,7 +114,14 @@ impl CaptionSession {
         let handle = std::thread::Builder::new()
             .name("lumen-caption".into())
             .spawn(move || {
-                run_worker(app, streaming_dir, worker_app, capture_rate, rx, worker_stop);
+                run_worker(
+                    app,
+                    streaming_dir,
+                    worker_app,
+                    capture_rate,
+                    rx,
+                    worker_stop,
+                );
             })
             .map_err(|e| e.to_string())?;
 
