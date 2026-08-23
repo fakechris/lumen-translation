@@ -398,9 +398,24 @@ fn live_subtitle_support() -> bool {
 
 /// Start the live-subtitle spike: tap the frontmost app's audio and stream
 /// recognition results to the caption overlay window.
+// Not cfg-gated at the fn level: generate_handler! references the command on
+// every platform, and a gated fn would not compile into the macro's expansion
+// on Windows. The non-mac body is the graceful refusal instead.
 #[tauri::command]
-#[cfg(target_os = "macos")]
 fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        live_subtitle_start_mac(app)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("live subtitles require macOS (system-audio process taps)".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn live_subtitle_start_mac(app: AppHandle) -> Result<(), String> {
     let frontmost = lumen_platform_macos::frontmost_app().ok_or(
         "no frontmost app to tap — switch to the video (browser/player) first, then start",
     )?;
@@ -429,15 +444,22 @@ fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
 
 /// Stop the live-subtitle spike and hide the overlay.
 #[tauri::command]
-#[cfg(target_os = "macos")]
 fn live_subtitle_stop(app: AppHandle) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    state.caption.stop();
-    if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
-        let _ = window.hide();
+    #[cfg(target_os = "macos")]
+    {
+        let state = app.state::<AppState>();
+        state.caption.stop();
+        if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
+            let _ = window.hide();
+        }
+        let _ = app.emit("caption-stopped", ());
+        Ok(())
     }
-    let _ = app.emit("caption-stopped", ());
-    Ok(())
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Ok(())
+    }
 }
 
 /// Live-subtitle running state, for the tray check item and frontend.
