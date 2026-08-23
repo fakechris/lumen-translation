@@ -373,6 +373,21 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
 // ---------------------------------------------------------------------------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Whether this host can tap per-app system audio (macOS 14.2+ Core Audio
+/// process taps). Gates the live-subtitle feature; reported so the frontend
+/// can hide the entry point on incapable hosts instead of failing at runtime.
+#[tauri::command]
+fn live_subtitle_support() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        lumen_platform_macos::system_audio_capability_available()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -420,6 +435,7 @@ pub fn run() {
             show_last,
             open_preferences,
             take_pending_translation,
+            live_subtitle_support,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
