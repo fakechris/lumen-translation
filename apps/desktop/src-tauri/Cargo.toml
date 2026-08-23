@@ -55,10 +55,10 @@ base64 = "0.22"
 #   lumen-asr-engine     → streaming Paraformer (+ MLX Whisper final pass)
 #   lumen-models         → model dir resolution / download / install lock
 [target.'cfg(target_os = "macos")'.dependencies]
-lumen-platform-macos = { git = "https://github.com/fakechris/lumen-suite.git", rev = "47008f5459c1e2fb040fadfee35183ece5838750" }
-lumen-audio = { git = "https://github.com/fakechris/lumen-suite.git", rev = "47008f5459c1e2fb040fadfee35183ece5838750" }
-lumen-asr-engine = { git = "https://github.com/fakechris/lumen-suite.git", rev = "47008f5459c1e2fb040fadfee35183ece5838750", default-features = false }
-lumen-models = { git = "https://github.com/fakechris/lumen-suite.git", rev = "47008f5459c1e2fb040fadfee35183ece5838750" }
+lumen-platform-macos = { git = "https://github.com/fakechris/lumen-suite.git", rev = "6d98c5f4fb3136b888e0fcf8d9886a8244495067" }
+lumen-audio = { git = "https://github.com/fakechris/lumen-suite.git", rev = "6d98c5f4fb3136b888e0fcf8d9886a8244495067" }
+lumen-asr-engine = { git = "https://github.com/fakechris/lumen-suite.git", rev = "6d98c5f4fb3136b888e0fcf8d9886a8244495067", default-features = false }
+lumen-models = { git = "https://github.com/fakechris/lumen-suite.git", rev = "6d98c5f4fb3136b888e0fcf8d9886a8244495067" }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"

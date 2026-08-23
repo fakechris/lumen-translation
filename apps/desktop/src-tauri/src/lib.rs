@@ -405,7 +405,15 @@ fn live_subtitle_support() -> bool {
 fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        live_subtitle_start_mac(app)
+        // Failures surface in the overlay instead of dying in stderr: open
+        // the window and emit the message so the user sees why nothing plays.
+        if let Err(err) = live_subtitle_start_mac(app.clone()) {
+            log::error!("live subtitle start failed: {err}");
+            show_caption_window(&app, "");
+            let _ = app.emit("caption-error", err.clone());
+            return Err(err);
+        }
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -416,7 +424,9 @@ fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn live_subtitle_start_mac(app: AppHandle) -> Result<(), String> {
-    let frontmost = lumen_platform_macos::frontmost_app().ok_or(
+    // The basic probe: the enriched one AppleScripts the browser for its tab
+    // URL, which can block ~2 min on the first-use Automation prompt.
+    let frontmost = lumen_platform_macos::frontmost_app_basic().ok_or(
         "no frontmost app to tap — switch to the video (browser/player) first, then start",
     )?;
     let bundle_id = frontmost
