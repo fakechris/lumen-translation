@@ -42,6 +42,7 @@ export default defineConfig({
         translate: 'index.html',
         prefs: 'prefs.html',
         bar: 'bar.html',
+        caption: 'caption.html',
       },
     },
   },

@@ -20,6 +20,8 @@ pub const ID_TRANSLATE: &str = "translate-selection";
 pub const ID_SHOW_LAST: &str = "show-last";
 pub const ID_PREFERENCES: &str = "preferences";
 pub const ID_QUIT: &str = "quit";
+/// macOS-only: toggle the live-subtitle spike session.
+pub const ID_LIVE_CAPTION: &str = "live-caption";
 pub const ENGINE_PREFIX: &str = "engine:";
 
 /// A provider as far as the tray is concerned.
@@ -79,16 +81,32 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let preferences = MenuItem::with_id(app, ID_PREFERENCES, "Preferences…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit Lumen Translation", true, None::<&str>)?;
 
-    MenuBuilder::new(app)
+    // Live subtitles exist only where the process-tap capability does; hiding
+    // the entry elsewhere beats a menu item that always errors.
+    #[cfg(target_os = "macos")]
+    let live_caption = {
+        let running = app.state::<AppState>().caption.is_running();
+        CheckMenuItem::with_id(
+            app,
+            ID_LIVE_CAPTION,
+            "实时字幕 (Live Subtitles)",
+            true,
+            running,
+            None::<&str>,
+        )?
+    };
+
+    let mut menu = MenuBuilder::new(app)
         .item(&translate)
         .item(&show_last)
         .separator()
         .item(&engine_menu)
-        .separator()
-        .item(&preferences)
-        .separator()
-        .item(&quit)
-        .build()
+        .separator();
+    #[cfg(target_os = "macos")]
+    {
+        menu = menu.item(&live_caption).separator();
+    }
+    menu.item(&preferences).separator().item(&quit).build()
 }
 
 /// Re-render the tray menu, e.g. after the engine list or selection changed.

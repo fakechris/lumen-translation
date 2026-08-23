@@ -415,3 +415,21 @@ button:focus-visible {
 .probe-result.fail {
   color: var(--danger);
 }
+
+/* --- live caption overlay (Spike 1) --- */
+.caption-body { background: transparent; overflow: hidden; }
+.caption-overlay {
+  display: flex; flex-direction: column; justify-content: flex-end;
+  height: 100vh; padding: 10px 16px; box-sizing: border-box;
+  font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+.caption-hint {
+  font-size: 11px; color: rgba(255, 255, 255, 0.45); margin-bottom: 4px;
+}
+.caption-lines { display: flex; flex-direction: column; gap: 2px; }
+.caption-line {
+  color: #fff; font-size: 26px; line-height: 1.35; text-align: center;
+}
+.caption-line.partial { color: rgba(255, 255, 255, 0.65); font-style: italic; }
+.caption-line:nth-child(1) { opacity: 0.5; font-size: 20px; }

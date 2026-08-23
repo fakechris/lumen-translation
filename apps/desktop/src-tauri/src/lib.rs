@@ -21,6 +21,9 @@ mod platform;
 mod settings;
 mod tray;
 
+#[cfg(target_os = "macos")]
+mod caption;
+
 use std::path::PathBuf;
 
 use parking_lot::{Mutex, RwLock};
@@ -39,6 +42,8 @@ use tray::Engine;
 const WINDOW_TRANSLATE: &str = "translate";
 const WINDOW_PREFS: &str = "prefs";
 const WINDOW_BAR: &str = "bar";
+#[cfg(target_os = "macos")]
+const WINDOW_CAPTION: &str = "caption";
 const TRAY_ID: &str = "main";
 
 /// Action bar size in logical pixels. Fixed rather than measured: the bar has
@@ -60,6 +65,9 @@ pub struct AppState {
     /// installed. Tauri events are not buffered, so the event alone can lose
     /// the first request while React is still mounting.
     pending_translation: Mutex<Option<String>>,
+    /// Live-subtitle spike session (macOS only; empty state elsewhere).
+    #[cfg(target_os = "macos")]
+    pub caption: caption::CaptionSession,
 }
 
 impl AppState {
@@ -388,6 +396,111 @@ fn live_subtitle_support() -> bool {
     }
 }
 
+/// Start the live-subtitle spike: tap the frontmost app's audio and stream
+/// recognition results to the caption overlay window.
+#[tauri::command]
+#[cfg(target_os = "macos")]
+fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
+    let frontmost = lumen_platform_macos::frontmost_app().ok_or(
+        "no frontmost app to tap — switch to the video (browser/player) first, then start",
+    )?;
+    let bundle_id = frontmost
+        .bundle_id
+        .clone()
+        .ok_or("frontmost app has no bundle id; cannot target it for an audio tap")?;
+    // Never tap ourselves: the caption overlay would transcribe its own UI.
+    if bundle_id.to_ascii_lowercase().contains("lumen") {
+        return Err("frontmost app is Lumen itself; switch to the video first".into());
+    }
+    let app_name = if frontmost.app_name.is_empty() {
+        bundle_id.clone()
+    } else {
+        frontmost.app_name.clone()
+    };
+
+    let state = app.state::<AppState>();
+    state
+        .caption
+        .start(app.clone(), bundle_id.clone(), app_name.clone())?;
+    show_caption_window(&app, &app_name);
+    let _ = app.emit("caption-started", &app_name);
+    Ok(())
+}
+
+/// Stop the live-subtitle spike and hide the overlay.
+#[tauri::command]
+#[cfg(target_os = "macos")]
+fn live_subtitle_stop(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    state.caption.stop();
+    if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
+        let _ = window.hide();
+    }
+    let _ = app.emit("caption-stopped", ());
+    Ok(())
+}
+
+/// Live-subtitle running state, for the tray check item and frontend.
+#[tauri::command]
+fn live_subtitle_running(app: AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        app.state::<AppState>().caption.is_running()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        false
+    }
+}
+
+/// The always-on-top caption overlay: bottom-center, transparent, non-focus.
+/// Created lazily (first start) rather than at boot — on non-macOS the
+/// feature does not exist, so the window must not either.
+#[cfg(target_os = "macos")]
+fn show_caption_window(app: &AppHandle, app_name: &str) {
+    let window = match app.get_webview_window(WINDOW_CAPTION) {
+        Some(w) => w,
+        None => {
+            let primary = app.primary_monitor().ok().flatten();
+            let width = 720.0;
+            let height = 120.0;
+            let mut builder = WebviewWindowBuilder::new(
+                app,
+                WINDOW_CAPTION,
+                WebviewUrl::App("caption.html".into()),
+            )
+            .title("Lumen Live Subtitles")
+            .inner_size(width, height)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(true)
+            .focused(false);
+            if let Some(monitor) = primary {
+                let size = monitor.size();
+                let scale = monitor.scale_factor();
+                let x = (size.width as f64 - width * scale) / (2.0 * scale);
+                let y = (size.height as f64) / scale - height - 72.0;
+                builder = builder.position(x, y);
+            }
+            match builder.build() {
+                Ok(w) => w,
+                Err(err) => {
+                    log::error!("caption window build failed: {err}");
+                    return;
+                }
+            }
+        }
+    };
+    // The fresh webview needs its listener mounted before events flow; the
+    // frontend pulls the current app name instead of trusting the event race.
+    let _ = app.emit("caption-target", app_name);
+    let _ = window.show();
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -436,6 +549,9 @@ pub fn run() {
             open_preferences,
             take_pending_translation,
             live_subtitle_support,
+            live_subtitle_running,
+            live_subtitle_start,
+            live_subtitle_stop,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -448,6 +564,8 @@ pub fn run() {
                 engines: RwLock::new(Vec::new()),
                 pending_selection: Mutex::new(None),
                 pending_translation: Mutex::new(None),
+                #[cfg(target_os = "macos")]
+                caption: caption::CaptionSession::default(),
             });
 
             build_windows(&handle)?;
@@ -545,6 +663,24 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
                 tray::ID_PREFERENCES => {
                     let _ = open_preferences(app.clone());
+                }
+                #[cfg(target_os = "macos")]
+                tray::ID_LIVE_CAPTION => {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let running = live_subtitle_running(app.clone());
+                        let result = if running {
+                            live_subtitle_stop(app.clone())
+                        } else {
+                            live_subtitle_start(app.clone())
+                        };
+                        if let Err(err) = result {
+                            log::error!("live subtitle toggle failed: {err}");
+                        }
+                        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+                            tray::refresh(&app, &tray.id());
+                        }
+                    });
                 }
                 tray::ID_QUIT => app.exit(0),
                 _ => {
