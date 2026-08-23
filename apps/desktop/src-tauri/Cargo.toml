@@ -48,6 +48,18 @@ parking_lot = "0.12"
 log = "0.4"
 base64 = "0.22"
 
+# Live-subtitle capability chain, shared with the Lumen cluster
+# (same rev-pin pattern as lumen-asr / lumen-navi):
+#   lumen-platform-macos → system audio process tap, permissions
+#   lumen-audio          → capture/resample plumbing
+#   lumen-asr-engine     → streaming Paraformer (+ MLX Whisper final pass)
+#   lumen-models         → model dir resolution / download / install lock
+[target.'cfg(target_os = "macos")'.dependencies]
+lumen-platform-macos = { git = "https://github.com/fakechris/lumen-suite.git", rev = "64f970d530c2c88d61b02925ed28b6f660f81e14" }
+lumen-audio = { git = "https://github.com/fakechris/lumen-suite.git", rev = "64f970d530c2c88d61b02925ed28b6f660f81e14" }
+lumen-asr-engine = { git = "https://github.com/fakechris/lumen-suite.git", rev = "64f970d530c2c88d61b02925ed28b6f660f81e14", default-features = false }
+lumen-models = { git = "https://github.com/fakechris/lumen-suite.git", rev = "64f970d530c2c88d61b02925ed28b6f660f81e14" }
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
