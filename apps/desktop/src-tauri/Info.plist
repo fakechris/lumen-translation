@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required for the Core Audio process tap (macOS 14.4+ shows the
+	     dedicated "System Audio Recording Only" prompt). Without a usage
+	     string the tap fails at TCC instead of prompting. -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Lumen taps the audio of the app you choose to generate live subtitles. Audio is processed on-device and never uploaded.</string>
+</dict>
+</plist>

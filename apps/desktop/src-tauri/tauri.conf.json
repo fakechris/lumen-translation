@@ -48,9 +48,7 @@
       }
     },
     "macOS": {
-      "infoPlist": {
-        "NSAudioCaptureUsageDescription": "Lumen taps the audio of the app you choose to generate live subtitles. Audio is processed on-device and never uploaded."
-      }
+      "infoPlist": "Info.plist"
     }
   }
 }
