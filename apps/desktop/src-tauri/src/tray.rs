@@ -21,6 +21,7 @@ pub const ID_SHOW_LAST: &str = "show-last";
 pub const ID_PREFERENCES: &str = "preferences";
 pub const ID_QUIT: &str = "quit";
 /// macOS-only: toggle the live-subtitle spike session.
+#[cfg(target_os = "macos")]
 pub const ID_LIVE_CAPTION: &str = "live-caption";
 pub const ENGINE_PREFIX: &str = "engine:";
 
