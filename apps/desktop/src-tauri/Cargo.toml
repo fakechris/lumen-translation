@@ -6,7 +6,7 @@ authors = ["Lumen Translation contributors"]
 license = "Apache-2.0"
 repository = "https://github.com/fakechris/lumen-translation"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.82"
 
 [lib]
 # Tauri's recommended layout: `main.rs` is a thin shim over the library so the
@@ -55,10 +55,11 @@ base64 = "0.22"
 #   lumen-asr-engine     → streaming Paraformer (+ MLX Whisper final pass)
 #   lumen-models         → model dir resolution / download / install lock
 [target.'cfg(target_os = "macos")'.dependencies]
-lumen-platform-macos = { git = "https://github.com/fakechris/lumen-suite.git", rev = "6d98c5f4fb3136b888e0fcf8d9886a8244495067" }
-lumen-audio = { git = "https://github.com/fakechris/lumen-suite.git", rev = "6d98c5f4fb3136b888e0fcf8d9886a8244495067" }
-lumen-asr-engine = { git = "https://github.com/fakechris/lumen-suite.git", rev = "6d98c5f4fb3136b888e0fcf8d9886a8244495067", default-features = false }
-lumen-models = { git = "https://github.com/fakechris/lumen-suite.git", rev = "6d98c5f4fb3136b888e0fcf8d9886a8244495067" }
+lumen-platform-macos = { git = "https://github.com/fakechris/lumen-suite.git", rev = "22c1e6c632f6d4aa76bf761468919f287690075c" }
+lumen-audio = { git = "https://github.com/fakechris/lumen-suite.git", rev = "22c1e6c632f6d4aa76bf761468919f287690075c" }
+lumen-asr-engine = { git = "https://github.com/fakechris/lumen-suite.git", rev = "22c1e6c632f6d4aa76bf761468919f287690075c", default-features = false, features = ["sherpa"] }
+lumen-models = { git = "https://github.com/fakechris/lumen-suite.git", rev = "22c1e6c632f6d4aa76bf761468919f287690075c" }
+objc2 = "0.6"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"

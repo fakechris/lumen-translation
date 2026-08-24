@@ -25,6 +25,8 @@ mod tray;
 mod caption;
 
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
 use tauri::tray::{TrayIconBuilder, TrayIconId};
@@ -36,6 +38,8 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use platform::selection::SelectionEvent;
 use platform::{selection, window_ext, Point, Rect, SelectionConfig};
+#[cfg(target_os = "macos")]
+use settings::LiveSubtitleCaptureMode;
 use settings::Settings;
 use tray::Engine;
 
@@ -53,6 +57,21 @@ const BAR_SIZE: (f64, f64) = (96.0, 36.0);
 /// Gap between the cursor and the bar, in logical pixels.
 const BAR_CURSOR_GAP: f64 = 14.0;
 
+#[cfg(target_os = "macos")]
+const CAPTION_HEIGHT: f64 = 280.0;
+#[cfg(target_os = "macos")]
+const CAPTION_WIDTH_RATIO: f64 = 0.82;
+#[cfg(target_os = "macos")]
+const CAPTION_MIN_WIDTH: f64 = 720.0;
+#[cfg(target_os = "macos")]
+const CAPTION_MAX_WIDTH: f64 = 1440.0;
+/// Use the visible work-area top plus a 12 pt inset. Tauri reports the full
+/// monitor frame here, so include the standard 25 pt menu-bar allowance.
+#[cfg(target_os = "macos")]
+const CAPTION_TOP_OFFSET: f64 = 37.0;
+#[cfg(target_os = "macos")]
+const CAPTION_ERROR_VISIBLE_FOR: Duration = Duration::from_secs(4);
+
 pub struct AppState {
     pub settings: RwLock<Settings>,
     settings_path: PathBuf,
@@ -68,6 +87,14 @@ pub struct AppState {
     /// Live-subtitle spike session (macOS only; empty state elsewhere).
     #[cfg(target_os = "macos")]
     pub caption: caption::CaptionSession,
+    /// Recoverable caption output delivery for hidden/suspended WebViews.
+    #[cfg(target_os = "macos")]
+    caption_journal: RwLock<caption::CaptionEventJournal>,
+    /// Latest target or transient startup error, pulled after the caption
+    /// webview has installed its event listeners. Revisions make delayed
+    /// error dismissal safe when another caption session starts meanwhile.
+    #[cfg(target_os = "macos")]
+    caption_status: RwLock<CaptionWindowState>,
 }
 
 impl AppState {
@@ -402,15 +429,25 @@ fn live_subtitle_support() -> bool {
 // every platform, and a gated fn would not compile into the macro's expansion
 // on Windows. The non-mac body is the graceful refusal instead.
 #[tauri::command]
-fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
+async fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         // Failures surface in the overlay instead of dying in stderr: open
         // the window and emit the message so the user sees why nothing plays.
-        if let Err(err) = live_subtitle_start_mac(app.clone()) {
+        if let Err(err) = live_subtitle_start_mac(app.clone()).await {
             log::error!("live subtitle start failed: {err}");
-            show_caption_window(&app, "");
-            let _ = app.emit("caption-error", err.clone());
+            app.state::<AppState>()
+                .caption_journal
+                .write()
+                .end_session();
+            let status = CaptionWindowStatus::Error(user_facing_caption_start_error(&err));
+            let revision = app
+                .state::<AppState>()
+                .caption_status
+                .write()
+                .publish(status.clone());
+            show_caption_window(&app, status);
+            schedule_caption_error_dismiss(app, revision);
             return Err(err);
         }
         Ok(())
@@ -423,33 +460,98 @@ fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn live_subtitle_start_mac(app: AppHandle) -> Result<(), String> {
-    // The basic probe: the enriched one AppleScripts the browser for its tab
-    // URL, which can block ~2 min on the first-use Automation prompt.
-    let frontmost = lumen_platform_macos::frontmost_app_basic().ok_or(
-        "no frontmost app to tap — switch to the video (browser/player) first, then start",
-    )?;
-    let bundle_id = frontmost
-        .bundle_id
-        .clone()
-        .ok_or("frontmost app has no bundle id; cannot target it for an audio tap")?;
-    // Never tap ourselves: the caption overlay would transcribe its own UI.
-    if bundle_id.to_ascii_lowercase().contains("lumen") {
-        return Err("frontmost app is Lumen itself; switch to the video first".into());
-    }
-    let app_name = if frontmost.app_name.is_empty() {
-        bundle_id.clone()
+async fn live_subtitle_start_mac(app: AppHandle) -> Result<(), String> {
+    let capture_mode = app
+        .state::<AppState>()
+        .settings
+        .read()
+        .live_subtitle_capture_mode;
+    // Only the privacy-scoped mode consults focus. The global mode creates a
+    // tap immediately and receives audio from any app that starts later.
+    let frontmost = if capture_mode == LiveSubtitleCaptureMode::FrontmostApp {
+        let frontmost_app = lumen_platform_macos::frontmost_app_basic().ok_or(
+            "no frontmost app to tap — switch to the video (browser/player) first, then start",
+        )?;
+        Some((
+            frontmost_app
+                .bundle_id
+                .ok_or("frontmost app has no bundle id; cannot target it for an audio tap")?,
+            frontmost_app.app_name,
+        ))
     } else {
-        frontmost.app_name.clone()
+        None
     };
-
+    let plan = caption_capture_plan(capture_mode, frontmost)?;
+    let app_name = plan.app_name;
+    let recognizer = tauri::async_runtime::spawn_blocking(caption::load_streaming_recognizer)
+        .await
+        .map_err(|error| format!("streaming model loader failed: {error}"))??;
     let state = app.state::<AppState>();
-    state
-        .caption
-        .start(app.clone(), bundle_id.clone(), app_name.clone())?;
-    show_caption_window(&app, &app_name);
+
+    // Finish any prior worker before opening a new journal session. Otherwise
+    // its trailing flush could publish an old final into the new session.
+    state.caption.stop();
+    let session_id = state.caption_journal.write().begin_session();
+
+    // The caption WebView is pre-created at app launch, so publish the target
+    // and reveal the listening state before model/capture startup. This keeps
+    // the first partial/final from racing a WebView that does not exist yet.
+    let status = CaptionWindowStatus::Target(app_name.clone());
+    state.caption_status.write().publish(status.clone());
+    show_caption_window(&app, status);
+    let _ = app.emit(
+        "caption-session-reset",
+        CaptionSessionResetEvent {
+            session_id,
+            app_name: app_name.clone(),
+        },
+    );
+    state.caption.start(
+        app.clone(),
+        session_id,
+        plan.target,
+        app_name.clone(),
+        recognizer,
+    )?;
     let _ = app.emit("caption-started", &app_name);
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+struct CaptionCapturePlan {
+    target: lumen_platform_macos::SystemAudioTarget,
+    app_name: String,
+}
+
+#[cfg(target_os = "macos")]
+fn caption_capture_plan(
+    mode: LiveSubtitleCaptureMode,
+    frontmost: Option<(String, String)>,
+) -> Result<CaptionCapturePlan, String> {
+    match mode {
+        LiveSubtitleCaptureMode::AllSystemAudio => Ok(CaptionCapturePlan {
+            target: lumen_platform_macos::SystemAudioTarget::all_system_audio(),
+            app_name: "系统音频".into(),
+        }),
+        LiveSubtitleCaptureMode::FrontmostApp => {
+            let (bundle_id, app_name) = frontmost.ok_or(
+                "no frontmost app to tap — switch to the video (browser/player) first, then start",
+            )?;
+            // Never tap ourselves: the caption overlay would transcribe its own UI.
+            if bundle_id.to_ascii_lowercase().contains("lumen") {
+                return Err("frontmost app is Lumen itself; switch to the video first".into());
+            }
+            let app_name = if app_name.is_empty() {
+                bundle_id.clone()
+            } else {
+                app_name
+            };
+            Ok(CaptionCapturePlan {
+                target: lumen_platform_macos::SystemAudioTarget::new([bundle_id]),
+                app_name,
+            })
+        }
+    }
 }
 
 /// Stop the live-subtitle spike and hide the overlay.
@@ -459,6 +561,8 @@ fn live_subtitle_stop(app: AppHandle) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
         state.caption.stop();
+        state.caption_journal.write().end_session();
+        state.caption_status.write().clear();
         if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
             let _ = window.hide();
         }
@@ -486,51 +590,273 @@ fn live_subtitle_running(app: AppHandle) -> bool {
     }
 }
 
-/// The always-on-top caption overlay: bottom-center, transparent, non-focus.
-/// Created lazily (first start) rather than at boot — on non-macOS the
-/// feature does not exist, so the window must not either.
+/// The always-on-top caption overlay state shared with its pre-created WebView.
 #[cfg(target_os = "macos")]
-fn show_caption_window(app: &AppHandle, app_name: &str) {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", content = "message", rename_all = "camelCase")]
+enum CaptionWindowStatus {
+    Target(String),
+    Error(String),
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptionSessionResetEvent {
+    session_id: u64,
+    app_name: String,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Default)]
+struct CaptionWindowState {
+    revision: u64,
+    current: Option<CaptionWindowStatus>,
+}
+
+#[cfg(target_os = "macos")]
+impl CaptionWindowState {
+    fn publish(&mut self, status: CaptionWindowStatus) -> u64 {
+        self.revision = self.revision.wrapping_add(1).max(1);
+        self.current = Some(status);
+        self.revision
+    }
+
+    fn clear(&mut self) {
+        self.revision = self.revision.wrapping_add(1).max(1);
+        self.current = None;
+    }
+
+    fn dismiss_error(&mut self, revision: u64) -> bool {
+        if self.revision != revision || !matches!(self.current, Some(CaptionWindowStatus::Error(_)))
+        {
+            return false;
+        }
+        self.clear();
+        true
+    }
+
+    fn current(&self) -> Option<CaptionWindowStatus> {
+        self.current.clone()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn user_facing_caption_start_error(error: &str) -> String {
+    if error.contains("target app is not producing audio") {
+        "当前应用没有播放声音。请先在视频或会议应用中开始播放，再启动实时字幕。".into()
+    } else if error.contains("frontmost app is Lumen itself") {
+        "请先切换到正在播放声音的视频或会议应用，再启动实时字幕。".into()
+    } else {
+        "实时字幕启动失败，请切换到正在播放声音的应用后重试。".into()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn schedule_caption_error_dismiss(app: AppHandle, revision: u64) {
+    let _ = std::thread::Builder::new()
+        .name("lumen-caption-error-dismiss".into())
+        .spawn(move || {
+            std::thread::sleep(CAPTION_ERROR_VISIBLE_FOR);
+            let should_hide = app
+                .state::<AppState>()
+                .caption_status
+                .write()
+                .dismiss_error(revision);
+            if should_hide {
+                if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
+                    let _ = window.hide();
+                }
+            }
+        });
+}
+
+/// Latest live-subtitle startup state. The caption webview pulls this only
+/// after its event listeners are installed, closing the first-window race.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn live_subtitle_status(app: AppHandle) -> Option<CaptionWindowStatus> {
+    app.state::<AppState>().caption_status.read().current()
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn live_subtitle_status(app: AppHandle) -> Option<serde_json::Value> {
+    let _ = app;
+    None
+}
+
+/// Incremental recovery path for caption events missed while the WebView was
+/// hidden, suspended, mounting listeners, or reloading.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn live_subtitle_events(
+    app: AppHandle,
+    session_id: Option<u64>,
+    after_event_id: u64,
+) -> caption::CaptionJournalSnapshot {
+    app.state::<AppState>()
+        .caption_journal
+        .read()
+        .snapshot_since(session_id, after_event_id)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn live_subtitle_events(
+    app: AppHandle,
+    session_id: Option<u64>,
+    after_event_id: u64,
+) -> serde_json::Value {
+    let _ = (app, session_id, after_event_id);
+    serde_json::json!({ "sessionId": 0, "entries": [] })
+}
+
+#[cfg(target_os = "macos")]
+fn emit_caption_window_status(window: &WebviewWindow, status: &CaptionWindowStatus) {
+    match status {
+        CaptionWindowStatus::Target(app_name) => {
+            let _ = window.emit("caption-target", app_name);
+        }
+        CaptionWindowStatus::Error(error) => {
+            let _ = window.emit("caption-error", error);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn show_caption_window(app: &AppHandle, status: CaptionWindowStatus) {
     let window = match app.get_webview_window(WINDOW_CAPTION) {
         Some(w) => w,
-        None => {
-            let primary = app.primary_monitor().ok().flatten();
-            let width = 720.0;
-            let height = 120.0;
-            let mut builder = WebviewWindowBuilder::new(
-                app,
-                WINDOW_CAPTION,
-                WebviewUrl::App("caption.html".into()),
-            )
+        None => match build_caption_window(app) {
+            Ok(w) => w,
+            Err(err) => {
+                log::error!("caption window build failed: {err}");
+                return;
+            }
+        },
+    };
+    position_caption_window(app, &window);
+    emit_caption_window_status(&window, &status);
+    let _ = window.show();
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CaptionWindowGeometry {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[cfg(target_os = "macos")]
+fn caption_window_geometry(
+    monitor_x: i32,
+    monitor_y: i32,
+    monitor_width: u32,
+    monitor_height: u32,
+    scale: f64,
+) -> CaptionWindowGeometry {
+    let logical_width = monitor_width as f64 / scale;
+    let logical_height = monitor_height as f64 / scale;
+    let width = (logical_width * CAPTION_WIDTH_RATIO).clamp(
+        CAPTION_MIN_WIDTH.min(logical_width),
+        CAPTION_MAX_WIDTH.min(logical_width),
+    );
+    let height = CAPTION_HEIGHT.min((logical_height - CAPTION_TOP_OFFSET).max(88.0));
+    let physical_width = (width * scale).round() as u32;
+    let physical_height = (height * scale).round() as u32;
+
+    CaptionWindowGeometry {
+        x: monitor_x + ((monitor_width.saturating_sub(physical_width)) / 2) as i32,
+        y: monitor_y + (CAPTION_TOP_OFFSET * scale).round() as i32,
+        width: physical_width,
+        height: physical_height,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn position_caption_window(app: &AppHandle, window: &WebviewWindow) {
+    let monitor = app
+        .cursor_position()
+        .ok()
+        .and_then(|position| {
+            app.monitor_from_point(position.x, position.y)
+                .ok()
+                .flatten()
+        })
+        .or_else(|| app.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else { return };
+    let position = monitor.position();
+    let size = monitor.size();
+    let geometry = caption_window_geometry(
+        position.x,
+        position.y,
+        size.width,
+        size.height,
+        monitor.scale_factor(),
+    );
+
+    let _ = window.set_size(PhysicalSize::new(geometry.width, geometry.height));
+    let _ = window.set_position(PhysicalPosition::new(geometry.x, geometry.y));
+}
+
+#[cfg(target_os = "macos")]
+fn configure_caption_window(window: &WebviewWindow) {
+    // The subtitle content is intentionally click-through. This window has no
+    // interactive controls, so it should never intercept the user's pointer.
+    let _ = window.set_ignore_cursor_events(true);
+
+    let ns_window_owner = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use objc2::msg_send;
+        use objc2::runtime::{AnyObject, Bool};
+
+        const CAN_JOIN_ALL_SPACES: usize = 1 << 0;
+        const STATIONARY: usize = 1 << 4;
+        const IGNORES_CYCLE: usize = 1 << 6;
+        const FULL_SCREEN_AUXILIARY: usize = 1 << 8;
+
+        let Ok(pointer) = ns_window_owner.ns_window() else {
+            return;
+        };
+        let ns_window = pointer.cast::<AnyObject>();
+        if ns_window.is_null() {
+            return;
+        }
+
+        unsafe {
+            let current: usize = msg_send![ns_window, collectionBehavior];
+            let behavior =
+                current | CAN_JOIN_ALL_SPACES | STATIONARY | IGNORES_CYCLE | FULL_SCREEN_AUXILIARY;
+            let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+            let _: () = msg_send![ns_window, setHidesOnDeactivate: Bool::NO];
+            // Use a screen-saver-level overlay so browser full-screen windows
+            // cannot cover the captions when focus changes.
+            let _: () = msg_send![ns_window, setLevel: 1000_isize];
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn build_caption_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    let window =
+        WebviewWindowBuilder::new(app, WINDOW_CAPTION, WebviewUrl::App("caption.html".into()))
             .title("Lumen Live Subtitles")
-            .inner_size(width, height)
+            .inner_size(1024.0, CAPTION_HEIGHT)
             .decorations(false)
             .transparent(true)
             .shadow(false)
             .always_on_top(true)
             .skip_taskbar(true)
             .resizable(true)
-            .focused(false);
-            if let Some(monitor) = primary {
-                let size = monitor.size();
-                let scale = monitor.scale_factor();
-                let x = (size.width as f64 - width * scale) / (2.0 * scale);
-                let y = (size.height as f64) / scale - height - 72.0;
-                builder = builder.position(x, y);
-            }
-            match builder.build() {
-                Ok(w) => w,
-                Err(err) => {
-                    log::error!("caption window build failed: {err}");
-                    return;
-                }
-            }
-        }
-    };
-    // The fresh webview needs its listener mounted before events flow; the
-    // frontend pulls the current app name instead of trusting the event race.
-    let _ = app.emit("caption-target", app_name);
-    let _ = window.show();
+            .focused(false)
+            .visible(false)
+            .build()?;
+    configure_caption_window(&window);
+    position_caption_window(app, &window);
+    Ok(window)
 }
 
 pub fn run() {
@@ -582,6 +908,8 @@ pub fn run() {
             take_pending_translation,
             live_subtitle_support,
             live_subtitle_running,
+            live_subtitle_events,
+            live_subtitle_status,
             live_subtitle_start,
             live_subtitle_stop,
         ])
@@ -589,7 +917,21 @@ pub fn run() {
             let handle = app.handle().clone();
 
             let settings_path = settings::default_path(app.path().app_config_dir()?);
+            #[cfg(target_os = "macos")]
+            let settings_file_exists = settings_path.exists();
+            #[cfg(target_os = "macos")]
+            let mut loaded = settings::load(&settings_path);
+            #[cfg(not(target_os = "macos"))]
             let loaded = settings::load(&settings_path);
+            #[cfg(target_os = "macos")]
+            if !settings_file_exists {
+                let imported = settings::overlay_legacy_macos_defaults(&mut loaded);
+                if imported > 0 {
+                    // Count only; never put preference values or credential
+                    // material into logs.
+                    log::info!("loaded {imported} legacy macOS preference fields into memory");
+                }
+            }
             app.manage(AppState {
                 settings: RwLock::new(loaded.clone()),
                 settings_path,
@@ -598,6 +940,10 @@ pub fn run() {
                 pending_translation: Mutex::new(None),
                 #[cfg(target_os = "macos")]
                 caption: caption::CaptionSession::default(),
+                #[cfg(target_os = "macos")]
+                caption_journal: RwLock::new(caption::CaptionEventJournal::default()),
+                #[cfg(target_os = "macos")]
+                caption_status: RwLock::new(CaptionWindowState::default()),
             });
 
             build_windows(&handle)?;
@@ -625,6 +971,103 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Lumen Translation");
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod caption_status_tests {
+    use super::{
+        caption_capture_plan, caption_window_geometry, CaptionWindowGeometry, CaptionWindowState,
+        CaptionWindowStatus,
+    };
+    use crate::settings::LiveSubtitleCaptureMode;
+
+    #[test]
+    fn caption_window_has_ipc_capability() {
+        let shared: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/caption.json")).unwrap();
+        let windows = capability["windows"].as_array().unwrap();
+        let shared_windows = shared["windows"].as_array().unwrap();
+
+        assert!(
+            windows.iter().any(|window| window == "caption"),
+            "the caption webview must be allowed to listen for captions and invoke status commands"
+        );
+        assert!(!shared_windows.iter().any(|window| window == "caption"));
+    }
+
+    #[test]
+    fn caption_window_status_matches_frontend_shape() {
+        assert_eq!(
+            serde_json::to_value(CaptionWindowStatus::Target("Browser".into())).unwrap(),
+            serde_json::json!({ "kind": "target", "message": "Browser" })
+        );
+        assert_eq!(
+            serde_json::to_value(CaptionWindowStatus::Error("tap failed".into())).unwrap(),
+            serde_json::json!({ "kind": "error", "message": "tap failed" })
+        );
+    }
+
+    #[test]
+    fn current_start_error_can_be_dismissed() {
+        let mut state = CaptionWindowState::default();
+        let revision = state.publish(CaptionWindowStatus::Error("tap failed".into()));
+
+        assert!(state.dismiss_error(revision));
+        assert_eq!(state.current(), None);
+    }
+
+    #[test]
+    fn stale_error_timeout_cannot_hide_a_new_caption_session() {
+        let mut state = CaptionWindowState::default();
+        let stale_revision = state.publish(CaptionWindowStatus::Error("tap failed".into()));
+        state.publish(CaptionWindowStatus::Target("Player".into()));
+
+        assert!(!state.dismiss_error(stale_revision));
+        assert_eq!(
+            state.current(),
+            Some(CaptionWindowStatus::Target("Player".into()))
+        );
+    }
+
+    #[test]
+    fn all_system_audio_does_not_require_a_frontmost_application() {
+        let plan = caption_capture_plan(LiveSubtitleCaptureMode::AllSystemAudio, None).unwrap();
+
+        assert!(plan.target.captures_all_system_audio());
+        assert_eq!(plan.app_name, "系统音频");
+    }
+
+    #[test]
+    fn frontmost_mode_validates_and_names_the_selected_application() {
+        assert!(caption_capture_plan(LiveSubtitleCaptureMode::FrontmostApp, None).is_err());
+        assert!(caption_capture_plan(
+            LiveSubtitleCaptureMode::FrontmostApp,
+            Some(("app.lumen.translation".into(), "Lumen".into())),
+        )
+        .is_err());
+
+        let plan = caption_capture_plan(
+            LiveSubtitleCaptureMode::FrontmostApp,
+            Some(("com.example.player".into(), String::new())),
+        )
+        .unwrap();
+        assert_eq!(plan.app_name, "com.example.player");
+    }
+
+    #[test]
+    fn caption_window_matches_top_center_geometry() {
+        assert_eq!(
+            caption_window_geometry(0, 0, 3024, 1964, 2.0),
+            CaptionWindowGeometry {
+                x: 272,
+                y: 74,
+                width: 2480,
+                height: 560,
+            }
+        );
+    }
 }
 
 fn build_windows(app: &AppHandle) -> tauri::Result<()> {
@@ -670,6 +1113,14 @@ fn build_windows(app: &AppHandle) -> tauri::Result<()> {
     bar.set_size(LogicalSize::new(BAR_SIZE.0, BAR_SIZE.1))?;
     make_bar_non_activating(&bar);
 
+    #[cfg(target_os = "macos")]
+    {
+        // Mount the caption WebView and its event listeners before a user can
+        // start capture. Tauri events are not buffered, so lazy creation loses
+        // the first speech burst while React is still loading.
+        let _ = build_caption_window(app)?;
+    }
+
     Ok(())
 }
 
@@ -704,7 +1155,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                         let result = if running {
                             live_subtitle_stop(app.clone())
                         } else {
-                            live_subtitle_start(app.clone())
+                            live_subtitle_start(app.clone()).await
                         };
                         if let Err(err) = result {
                             log::error!("live subtitle toggle failed: {err}");

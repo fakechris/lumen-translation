@@ -416,22 +416,149 @@ button:focus-visible {
   color: var(--danger);
 }
 
-/* --- live caption overlay (Spike 1) --- */
-.caption-body { background: transparent; overflow: hidden; }
+/* ------------------------------------------------------------------ */
+/* Live subtitle overlay — continuous bilingual flow                   */
+/* ------------------------------------------------------------------ */
+
+.caption-body,
+.caption-body > #root {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
 .caption-overlay {
-  display: flex; flex-direction: column; justify-content: flex-end;
-  height: 100vh; padding: 10px 16px; box-sizing: border-box;
-  font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  font-family: -apple-system, 'PingFang SC', 'Segoe UI', sans-serif;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 90%);
 }
+
+.caption-surface {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 100%;
+  height: 100%;
+  padding: 12px 48px 14px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 16px;
+  background: rgb(0 0 0 / 32%);
+}
+
+.caption-overlay.has-error .caption-surface {
+  align-items: center;
+  justify-content: center;
+  background: rgb(20 18 16 / 82%);
+}
+
 .caption-hint {
-  font-size: 11px; color: rgba(255, 255, 255, 0.45); margin-bottom: 4px;
+  margin: auto 0;
+  color: rgb(255 255 255 / 70%);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
 }
-.caption-lines { display: flex; flex-direction: column; gap: 2px; }
+
+.caption-hint.error {
+  max-width: 760px;
+  padding: 16px 24px;
+  color: rgb(255 210 180 / 95%);
+  font-size: 15px;
+  text-shadow: none;
+}
+
+.caption-flow {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent 0%, rgb(0 0 0 / 80%) 10%, #000 22%);
+}
+
+.caption-block {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  animation: caption-promote 320ms cubic-bezier(0.22, 0.8, 0.3, 1);
+  transition: opacity 180ms ease;
+}
+
+.caption-block.history:first-child {
+  opacity: 0.38;
+}
+
+.caption-block.history:not(:first-child) {
+  opacity: 0.62;
+}
+
 .caption-line {
-  color: #fff; font-size: 26px; line-height: 1.35; text-align: center;
+  width: 100%;
+  color: #fff;
+  line-height: 1.28;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
-.caption-line.partial { color: rgba(255, 255, 255, 0.65); font-style: italic; font-size: 18px; }
-.caption-block + .caption-block { opacity: 0.55; }
-.caption-line.translation { font-size: 26px; font-weight: 500; }
-.caption-line.original { font-size: 19px; color: rgba(255, 255, 255, 0.75); }
+
+.caption-line.translation {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.caption-line.original {
+  color: rgb(255 255 255 / 82%);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.34;
+}
+
+.caption-block.draft {
+  min-height: 62px;
+  gap: 2px;
+}
+
+.caption-line.draft-translation {
+  color: rgb(255 255 255 / 55%);
+}
+
+.caption-line.draft-translation.placeholder {
+  visibility: hidden;
+}
+
+.caption-line.draft-original {
+  color: inherit;
+}
+
+.draft-stable {
+  color: rgb(255 255 255 / 62%);
+}
+
+.draft-mutable {
+  color: rgb(255 255 255 / 48%);
+}
+
+@keyframes caption-promote {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caption-block {
+    animation: none;
+    transition: none;
+  }
+}

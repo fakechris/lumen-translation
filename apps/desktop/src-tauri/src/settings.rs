@@ -36,6 +36,17 @@ pub struct CustomProvider {
     pub model: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LiveSubtitleCaptureMode {
+    /// Capture all current and future system-output processes. This keeps
+    /// subtitles alive when the media app is in the background.
+    #[default]
+    AllSystemAudio,
+    /// Capture only the app that is frontmost when subtitles are started.
+    FrontmostApp,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -54,6 +65,7 @@ pub struct Settings {
     pub min_selection_chars: usize,
     pub max_selection_chars: usize,
     pub launch_at_login: bool,
+    pub live_subtitle_capture_mode: LiveSubtitleCaptureMode,
     pub hotkey_show_last: String,
     pub hotkey_translate_selection: String,
 }
@@ -73,6 +85,7 @@ impl Default for Settings {
             min_selection_chars: 1,
             max_selection_chars: 5000,
             launch_at_login: false,
+            live_subtitle_capture_mode: LiveSubtitleCaptureMode::AllSystemAudio,
             hotkey_show_last: "Alt+Ctrl+L".into(),
             hotkey_translate_selection: "Alt+Ctrl+T".into(),
         }
@@ -177,6 +190,175 @@ pub fn default_path(app_data_dir: PathBuf) -> PathBuf {
     app_data_dir.join("settings.json")
 }
 
+/// Seed the Tauri runtime from the existing macOS Lumen `UserDefaults` when
+/// this desktop port has no JSON settings file yet. The values stay in memory:
+/// merely launching live subtitles never copies credentials to another file.
+#[cfg(target_os = "macos")]
+pub fn overlay_legacy_macos_defaults(settings: &mut Settings) -> usize {
+    let mut values = BTreeMap::new();
+    for key in [
+        "lumen.provider",
+        "lumen.region",
+        "lumen.sourceLang",
+        "lumen.targetLang",
+    ] {
+        if let Some(value) = macos_preference_string(key) {
+            values.insert(key.to_string(), value);
+        }
+    }
+
+    for id in [
+        "google_translate",
+        "google",
+        "microsoft_translator",
+        "microsoft",
+        "openai",
+        "openrouter",
+        "anthropic",
+        "kimi",
+        "glm",
+        "minimax",
+        "deepseek",
+    ] {
+        for prefix in ["lumen.apiKey.", "lumen.model."] {
+            let key = format!("{prefix}{id}");
+            if let Some(value) = macos_preference_string(&key) {
+                values.insert(key, value);
+            }
+        }
+    }
+
+    merge_legacy_macos_values(settings, &values)
+}
+
+#[cfg(target_os = "macos")]
+fn merge_legacy_macos_values(settings: &mut Settings, values: &BTreeMap<String, String>) -> usize {
+    fn canonical_id(id: &str) -> &str {
+        match id {
+            "google" => "google_translate",
+            "microsoft" => "microsoft_translator",
+            "anthropic" => "openrouter",
+            other => other,
+        }
+    }
+
+    let mut imported = 0;
+    if let Some(provider) = values
+        .get("lumen.provider")
+        .filter(|value| !value.is_empty())
+    {
+        settings.provider_id = canonical_id(provider).to_string();
+        imported += 1;
+    }
+    if let Some(region) = values.get("lumen.region").filter(|value| !value.is_empty()) {
+        settings.region = Some(region.clone());
+        imported += 1;
+    }
+    if let Some(source) = values
+        .get("lumen.sourceLang")
+        .filter(|value| !value.is_empty())
+    {
+        settings.source_lang = source.clone();
+        imported += 1;
+    }
+    if let Some(target) = values
+        .get("lumen.targetLang")
+        .filter(|value| !value.is_empty())
+    {
+        settings.target_lang = target.clone();
+        imported += 1;
+    }
+
+    for (key, value) in values {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if let Some(id) = key.strip_prefix("lumen.apiKey.") {
+            let canonical = canonical_id(id).to_string();
+            if canonical != id && values.contains_key(&format!("lumen.apiKey.{canonical}")) {
+                continue;
+            }
+            settings.api_keys.entry(canonical).or_insert_with(|| {
+                imported += 1;
+                value.to_string()
+            });
+        } else if let Some(id) = key.strip_prefix("lumen.model.") {
+            let canonical = canonical_id(id).to_string();
+            if canonical != id && values.contains_key(&format!("lumen.model.{canonical}")) {
+                continue;
+            }
+            settings.models.entry(canonical).or_insert_with(|| {
+                imported += 1;
+                value.to_string()
+            });
+        }
+    }
+    imported
+}
+
+#[cfg(target_os = "macos")]
+fn macos_preference_string(key: &str) -> Option<String> {
+    use std::ffi::{c_char, c_void, CStr, CString};
+
+    type CFStringRef = *const c_void;
+    type CFPropertyListRef = *const c_void;
+    const UTF8: u32 = 0x0800_0100;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        static kCFPreferencesCurrentApplication: CFStringRef;
+        fn CFStringCreateWithCString(
+            allocator: *const c_void,
+            value: *const c_char,
+            encoding: u32,
+        ) -> CFStringRef;
+        fn CFPreferencesCopyAppValue(key: CFStringRef, app_id: CFStringRef) -> CFPropertyListRef;
+        fn CFGetTypeID(value: CFPropertyListRef) -> usize;
+        fn CFStringGetTypeID() -> usize;
+        fn CFStringGetCString(
+            value: CFStringRef,
+            buffer: *mut c_char,
+            buffer_size: isize,
+            encoding: u32,
+        ) -> bool;
+        fn CFRelease(value: CFPropertyListRef);
+    }
+
+    let key = CString::new(key).ok()?;
+    unsafe {
+        let key_ref = CFStringCreateWithCString(std::ptr::null(), key.as_ptr(), UTF8);
+        if key_ref.is_null() {
+            return None;
+        }
+        let value = CFPreferencesCopyAppValue(key_ref, kCFPreferencesCurrentApplication);
+        CFRelease(key_ref);
+        if value.is_null() {
+            return None;
+        }
+        if CFGetTypeID(value) != CFStringGetTypeID() {
+            CFRelease(value);
+            return None;
+        }
+
+        let mut buffer = vec![0 as c_char; 65_536];
+        let copied = CFStringGetCString(
+            value.cast(),
+            buffer.as_mut_ptr(),
+            buffer.len() as isize,
+            UTF8,
+        );
+        CFRelease(value);
+        if !copied {
+            return None;
+        }
+        CStr::from_ptr(buffer.as_ptr())
+            .to_str()
+            .ok()
+            .map(str::to_owned)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,11 +379,48 @@ mod tests {
         assert!(decrypt_key("dpapi:not base64!").is_none());
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn legacy_macos_values_are_canonicalized_without_overwriting_runtime_values() {
+        let mut settings = Settings::default();
+        settings
+            .api_keys
+            .insert("openai".into(), "runtime-key".into());
+        let values = BTreeMap::from([
+            ("lumen.provider".into(), "anthropic".into()),
+            ("lumen.sourceLang".into(), "auto".into()),
+            ("lumen.targetLang".into(), "zh".into()),
+            ("lumen.apiKey.google".into(), "legacy-alias".into()),
+            (
+                "lumen.apiKey.google_translate".into(),
+                "canonical-key".into(),
+            ),
+            ("lumen.apiKey.openai".into(), "legacy-openai".into()),
+        ]);
+
+        merge_legacy_macos_values(&mut settings, &values);
+
+        assert_eq!(settings.provider_id, "openrouter");
+        assert_eq!(settings.target_lang, "zh");
+        assert_eq!(settings.api_keys["google_translate"], "canonical-key");
+        assert_eq!(settings.api_keys["openai"], "runtime-key");
+    }
+
     #[test]
     fn missing_file_yields_defaults() {
         let dir = test_dir("missing");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(load(&dir.join("settings.json")), Settings::default());
+    }
+
+    #[test]
+    fn old_settings_default_live_subtitles_to_all_system_audio() {
+        let settings: Settings = serde_json::from_str(r#"{"providerId":"deepseek"}"#).unwrap();
+
+        assert_eq!(
+            settings.live_subtitle_capture_mode,
+            LiveSubtitleCaptureMode::AllSystemAudio
+        );
     }
 
     #[test]

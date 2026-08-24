@@ -34,6 +34,8 @@ export interface Settings {
   region: 'cn' | 'overseas' | null;
   sourceLang: string;
   targetLang: string;
+  /** Which system-output processes feed live subtitles on macOS. */
+  liveSubtitleCaptureMode: 'allSystemAudio' | 'frontmostApp';
   customProviders: CustomProvider[];
   /** Whether the selection watcher shows the action bar (the PopClip role). */
   selectionPopupEnabled: boolean;
@@ -61,6 +63,7 @@ export const DEFAULT_SETTINGS: Settings = {
   region: null,
   sourceLang: 'auto',
   targetLang: 'zh-CN',
+  liveSubtitleCaptureMode: 'allSystemAudio',
   customProviders: [],
   selectionPopupEnabled: true,
   selectionClipboardFallback: true,
