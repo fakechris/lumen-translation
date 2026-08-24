@@ -554,9 +554,9 @@ function GeneralTab({ s, update }: TabProps) {
         </select>
       </div>
       <p className="hint">
-        All system audio keeps captions running when the player or meeting app is in the background,
-        and also hears apps that start playing later. Frontmost-only limits capture to the app
-        selected when subtitles start. Changes apply to the next subtitle session.
+        macOS only. All system audio keeps captions running when the player or meeting app is in the
+        background, and also hears apps that start playing later. Frontmost-only limits capture to
+        the app selected when subtitles start. Changes apply to the next subtitle session.
       </p>
 
       <div className="section-title">Endpoint region</div>

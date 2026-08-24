@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { captionReducer, initialCaptionState, shouldAcceptCaptionSession } from '../caption-state';
+import { captionFixtureState } from '../caption-fixtures';
 
 describe('caption session ordering', () => {
   it('rejects a stale recovery response after a newer session starts', () => {
-    expect(shouldAcceptCaptionSession(8, 7)).toBe(false);
-    expect(shouldAcceptCaptionSession(8, 8)).toBe(true);
-    expect(shouldAcceptCaptionSession(8, 9)).toBe(true);
+    expect(shouldAcceptCaptionSession(true, 8, 7)).toBe(false);
+    expect(shouldAcceptCaptionSession(true, 8, 8)).toBe(true);
+    expect(shouldAcceptCaptionSession(true, 8, 9)).toBe(true);
+    expect(shouldAcceptCaptionSession(false, null, 9)).toBe(false);
   });
 });
-import { captionFixtureState } from '../caption-fixtures';
 
 describe('caption visual fixtures', () => {
   it('provides a fully local continuous-flow state', () => {
@@ -23,6 +24,7 @@ describe('caption visual fixtures', () => {
   it('does not activate for missing or unknown fixture names', () => {
     expect(captionFixtureState(null)).toBeNull();
     expect(captionFixtureState('unknown')).toBeNull();
+    expect(captionFixtureState('constructor')).toBeNull();
   });
 });
 
@@ -107,6 +109,39 @@ describe('caption flow', () => {
       sourceText: 'First sentence. Second sentence.',
       translation: '第一句。第二句。',
     });
+  });
+
+  it('does not promote a draft translation when the final source changed', () => {
+    const draft = captionReducer(initialCaptionState, {
+      type: 'partial',
+      event: {
+        revision: 1,
+        utterance: 4,
+        seq: 0,
+        appName: 'Player',
+        text: 'draft wording',
+        isFinal: false,
+      },
+    });
+    const translated = captionReducer(draft, {
+      type: 'draft-translation',
+      utterance: 4,
+      sourceText: 'draft wording',
+      translation: '旧翻译',
+    });
+    const final = captionReducer(translated, {
+      type: 'final',
+      event: {
+        revision: 2,
+        utterance: 4,
+        seq: 0,
+        appName: 'Player',
+        text: 'corrected wording',
+        isFinal: true,
+      },
+    });
+
+    expect(final.captions[0].translation).toBeUndefined();
   });
 
   it('applies a late refine in chronological place without moving old text to the bottom', () => {

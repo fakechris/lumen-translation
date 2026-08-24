@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "caption",
+  "description": "Minimal event and IPC capability for the live-caption overlay.",
+  "windows": ["caption"],
+  "permissions": ["core:event:default"]
+}

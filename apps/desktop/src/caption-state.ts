@@ -68,10 +68,11 @@ export const initialCaptionState: CaptionState = {
 };
 
 export function shouldAcceptCaptionSession(
+  active: boolean,
   currentSessionId: number | null,
   incomingSessionId: number,
 ): boolean {
-  return currentSessionId === null || incomingSessionId >= currentSessionId;
+  return active && (currentSessionId === null || incomingSessionId >= currentSessionId);
 }
 
 const CAPTION_HISTORY_LIMIT = 24;
@@ -127,20 +128,32 @@ export function captionReducer(state: CaptionState, action: CaptionAction): Capt
 
       const id = `utterance-${event.utterance}`;
       const existingIndex = state.captions.findIndex((caption) => caption.id === id);
+      const draftForUtterance = state.draft?.utterance === event.utterance ? state.draft : null;
       let captions = state.captions;
+      let committedSourceText = piece;
 
       if (existingIndex >= 0) {
         const existing = state.captions[existingIndex];
         if (event.seq <= existing.lastSeq) return { ...state, lastRevision: event.revision };
         const sourceText = appendCaptionPiece(existing.sourceText, piece);
+        committedSourceText = sourceText;
         captions = state.captions.map((caption, index) =>
           index === existingIndex
-            ? { ...caption, lastSeq: event.seq, sourceText, corrected: false }
+            ? {
+                ...caption,
+                lastSeq: event.seq,
+                sourceText,
+                translation:
+                  draftForUtterance?.sourceText === sourceText
+                    ? draftForUtterance.translation
+                    : caption.translation,
+                corrected: false,
+              }
             : caption,
         );
       } else {
         const promotedTranslation =
-          state.draft?.utterance === event.utterance ? state.draft.translation : undefined;
+          draftForUtterance?.sourceText === piece ? draftForUtterance.translation : undefined;
         captions = [
           ...state.captions,
           {
@@ -154,10 +167,15 @@ export function captionReducer(state: CaptionState, action: CaptionAction): Capt
         ].slice(-CAPTION_HISTORY_LIMIT);
       }
 
+      const keepDraft =
+        draftForUtterance !== null &&
+        draftForUtterance.sourceText !== committedSourceText &&
+        draftForUtterance.sourceText.startsWith(committedSourceText);
+
       return {
         ...state,
         captions,
-        draft: state.draft?.utterance === event.utterance ? null : state.draft,
+        draft: draftForUtterance ? (keepDraft ? draftForUtterance : null) : state.draft,
         appName: event.appName,
         error: '',
         lastRevision: event.revision,

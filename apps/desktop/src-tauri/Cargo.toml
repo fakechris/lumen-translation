@@ -6,7 +6,7 @@ authors = ["Lumen Translation contributors"]
 license = "Apache-2.0"
 repository = "https://github.com/fakechris/lumen-translation"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.82"
 
 [lib]
 # Tauri's recommended layout: `main.rs` is a thin shim over the library so the

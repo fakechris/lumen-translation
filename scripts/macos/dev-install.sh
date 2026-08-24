@@ -39,7 +39,13 @@ esac
 
 installed_executable="$INSTALL_DEST/Contents/MacOS/lumen-translation-desktop"
 running_installed_pids() {
-  pgrep -f -x "$installed_executable" 2>/dev/null || true
+  ps -axo pid=,comm= | awk -v executable="$installed_executable" '
+    {
+      pid = $1
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "")
+      if ($0 == executable) print pid
+    }
+  ' || true
 }
 
 stop_installed_app() {
@@ -81,7 +87,7 @@ if [[ ! -d "$APP_SRC" ]]; then
 fi
 
 echo "==> signing with '$IDENTITY'"
-SIGN_ARGS=(--force --deep --sign "$IDENTITY")
+SIGN_ARGS=(--force --deep --options runtime --sign "$IDENTITY")
 # Keep the stable local signature and its audio/automation capabilities
 # together so TCC sees the rebuilt app as the same local application.
 if [[ -f "$ENTITLEMENTS" ]]; then

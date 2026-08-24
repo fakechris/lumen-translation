@@ -114,17 +114,20 @@ const CAPTION_JOURNAL_LIMIT: usize = 128;
 pub struct CaptionEventJournal {
     session_id: u64,
     next_event_id: u64,
+    active: bool,
     entries: VecDeque<CaptionJournalEntry>,
 }
 
 impl CaptionEventJournal {
     pub fn begin_session(&mut self) -> u64 {
         self.session_id = self.session_id.saturating_add(1).max(1);
+        self.active = true;
         self.entries.clear();
         self.session_id
     }
 
-    pub fn clear(&mut self) {
+    pub fn end_session(&mut self) {
+        self.active = false;
         self.entries.clear();
     }
 
@@ -145,6 +148,14 @@ impl CaptionEventJournal {
         entry
     }
 
+    pub fn push_for_session(
+        &mut self,
+        session_id: u64,
+        output: CaptionOutput,
+    ) -> Option<CaptionJournalEntry> {
+        (self.active && self.session_id == session_id).then(|| self.push(output))
+    }
+
     pub fn snapshot_since(
         &self,
         session_id: Option<u64>,
@@ -163,17 +174,24 @@ impl CaptionEventJournal {
     }
 }
 
-fn publish_caption(app: &AppHandle, output: CaptionOutput) {
-    let entry = app
+fn publish_caption(app: &AppHandle, session_id: u64, output: CaptionOutput) {
+    let Some(entry) = app
         .state::<crate::AppState>()
         .caption_journal
         .write()
-        .push(output);
-    let Some(window) = app.get_webview_window(crate::WINDOW_CAPTION) else {
-        log::warn!("caption output journaled but caption window is unavailable");
+        .push_for_session(session_id, output)
+    else {
         return;
     };
-    if let Err(error) = window.emit("caption-output", &entry) {
+    static MISSING_WINDOW_WARNED: AtomicBool = AtomicBool::new(false);
+    let Some(_window) = app.get_webview_window(crate::WINDOW_CAPTION) else {
+        if !MISSING_WINDOW_WARNED.swap(true, Ordering::Relaxed) {
+            log::warn!("caption output journaled but caption window is unavailable");
+        }
+        return;
+    };
+    MISSING_WINDOW_WARNED.store(false, Ordering::Relaxed);
+    if let Err(error) = app.emit_to(crate::WINDOW_CAPTION, "caption-output", &entry) {
         // The journal is authoritative for delivery; a later frontend pull
         // will recover this entry even if the transient event failed.
         log::warn!("caption live event delivery failed; recovery pull will retry: {error}");
@@ -210,26 +228,16 @@ impl CaptionSession {
     pub fn start(
         &self,
         app: AppHandle,
+        session_id: u64,
         target: lumen_platform_macos::SystemAudioTarget,
         app_name: String,
+        recognizer: lumen_asr_engine::StreamingRecognizer,
     ) -> Result<(), String> {
         let mut guard = self.inner.lock().map_err(|e| e.to_string())?;
         // Defensive: reap any stopped-but-unjoined worker first.
         if let Some(mut worker) = guard.take() {
             worker.shutdown();
         }
-
-        let streaming_dir = streaming_dir_if_ready().ok_or_else(|| {
-            format!(
-                "streaming Paraformer model not found under {} — install it via Lumen ASR's model settings, then retry",
-                default_streaming_dir().display()
-            )
-        })?;
-        // Load before opening the tap or publishing a running target. A model
-        // initialization error is a start failure, not an asynchronous worker
-        // event that a freshly created caption webview could miss.
-        let recognizer = lumen_asr_engine::StreamingRecognizer::from_dir(&streaming_dir)
-            .map_err(|e| format!("could not load streaming model: {e}"))?;
 
         let (tx, rx) = std::sync::mpsc::sync_channel(AUDIO_QUEUE_CAPACITY);
         let sink: lumen_platform_macos::SystemAudioSink = Arc::new(move |samples: &[f32]| {
@@ -268,7 +276,7 @@ impl CaptionSession {
             std::thread::Builder::new()
                 .name("lumen-caption-refine".into())
                 .spawn(move || {
-                    run_refine_worker(app, app_name, refine_rx, enabled, stop);
+                    run_refine_worker(app, session_id, app_name, refine_rx, enabled, stop);
                 })
                 .ok()
         };
@@ -278,6 +286,7 @@ impl CaptionSession {
             .spawn(move || {
                 run_worker(
                     app,
+                    session_id,
                     recognizer,
                     app_name,
                     capture_rate,
@@ -336,6 +345,7 @@ struct RefineJob {
 
 fn run_worker(
     app: AppHandle,
+    session_id: u64,
     recognizer: lumen_asr_engine::StreamingRecognizer,
     app_name: String,
     capture_rate: u32,
@@ -385,6 +395,7 @@ fn run_worker(
                 for (seq, piece) in split_caption_pieces(&text).into_iter().enumerate() {
                     publish_caption(
                         &app,
+                        session_id,
                         CaptionOutput::Final(CaptionEvent {
                             revision,
                             utterance,
@@ -413,6 +424,7 @@ fn run_worker(
             if text != last_partial && !text.trim().is_empty() {
                 publish_caption(
                     &app,
+                    session_id,
                     CaptionOutput::Partial(CaptionEvent {
                         revision,
                         utterance: utterance + 1,
@@ -437,6 +449,7 @@ fn run_worker(
         for (seq, piece) in split_caption_pieces(&text).into_iter().enumerate() {
             publish_caption(
                 &app,
+                session_id,
                 CaptionOutput::Final(CaptionEvent {
                     revision,
                     utterance,
@@ -472,6 +485,7 @@ fn maybe_enqueue_refine(
 
 fn run_refine_worker(
     app: AppHandle,
+    session_id: u64,
     app_name: String,
     rx: Receiver<RefineJob>,
     enabled: Arc<AtomicBool>,
@@ -506,6 +520,7 @@ fn run_refine_worker(
                 if !text.is_empty() {
                     publish_caption(
                         &app,
+                        session_id,
                         CaptionOutput::Refine(CaptionRefineEvent {
                             utterance: job.utterance,
                             app_name: app_name.clone(),
@@ -572,6 +587,17 @@ fn default_streaming_dir() -> PathBuf {
     lumen_models::default_paraformer_streaming_dir()
 }
 
+pub fn load_streaming_recognizer() -> Result<lumen_asr_engine::StreamingRecognizer, String> {
+    let streaming_dir = streaming_dir_if_ready().ok_or_else(|| {
+        format!(
+            "streaming Paraformer model not found under {} — install it via Lumen ASR's model settings, then retry",
+            default_streaming_dir().display()
+        )
+    })?;
+    lumen_asr_engine::StreamingRecognizer::from_dir(&streaming_dir)
+        .map_err(|error| format!("could not load streaming model: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{split_caption_pieces, CaptionEvent, CaptionEventJournal, CaptionOutput};
@@ -615,6 +641,24 @@ mod tests {
         assert_eq!(snapshot.session_id, new_session);
         assert_eq!(snapshot.entries.len(), 1);
         assert_eq!(snapshot.entries[0].event_id, current.event_id);
+    }
+
+    #[test]
+    fn ended_or_replaced_sessions_reject_late_worker_output() {
+        let mut journal = CaptionEventJournal::default();
+        let old_session = journal.begin_session();
+        journal.end_session();
+        assert!(journal
+            .push_for_session(old_session, partial(2, "late"))
+            .is_none());
+
+        let new_session = journal.begin_session();
+        assert!(journal
+            .push_for_session(old_session, partial(3, "stale"))
+            .is_none());
+        assert!(journal
+            .push_for_session(new_session, partial(4, "current"))
+            .is_some());
     }
 
     #[test]

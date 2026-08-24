@@ -429,13 +429,17 @@ fn live_subtitle_support() -> bool {
 // every platform, and a gated fn would not compile into the macro's expansion
 // on Windows. The non-mac body is the graceful refusal instead.
 #[tauri::command]
-fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
+async fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         // Failures surface in the overlay instead of dying in stderr: open
         // the window and emit the message so the user sees why nothing plays.
-        if let Err(err) = live_subtitle_start_mac(app.clone()) {
+        if let Err(err) = live_subtitle_start_mac(app.clone()).await {
             log::error!("live subtitle start failed: {err}");
+            app.state::<AppState>()
+                .caption_journal
+                .write()
+                .end_session();
             let status = CaptionWindowStatus::Error(user_facing_caption_start_error(&err));
             let revision = app
                 .state::<AppState>()
@@ -456,25 +460,33 @@ fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn live_subtitle_start_mac(app: AppHandle) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let capture_mode = state.settings.read().live_subtitle_capture_mode;
+async fn live_subtitle_start_mac(app: AppHandle) -> Result<(), String> {
+    let capture_mode = app
+        .state::<AppState>()
+        .settings
+        .read()
+        .live_subtitle_capture_mode;
     // Only the privacy-scoped mode consults focus. The global mode creates a
     // tap immediately and receives audio from any app that starts later.
     let frontmost = if capture_mode == LiveSubtitleCaptureMode::FrontmostApp {
-        let app = lumen_platform_macos::frontmost_app_basic().ok_or(
+        let frontmost_app = lumen_platform_macos::frontmost_app_basic().ok_or(
             "no frontmost app to tap — switch to the video (browser/player) first, then start",
         )?;
         Some((
-            app.bundle_id
+            frontmost_app
+                .bundle_id
                 .ok_or("frontmost app has no bundle id; cannot target it for an audio tap")?,
-            app.app_name,
+            frontmost_app.app_name,
         ))
     } else {
         None
     };
     let plan = caption_capture_plan(capture_mode, frontmost)?;
     let app_name = plan.app_name;
+    let recognizer = tauri::async_runtime::spawn_blocking(caption::load_streaming_recognizer)
+        .await
+        .map_err(|error| format!("streaming model loader failed: {error}"))??;
+    let state = app.state::<AppState>();
 
     // Finish any prior worker before opening a new journal session. Otherwise
     // its trailing flush could publish an old final into the new session.
@@ -494,9 +506,13 @@ fn live_subtitle_start_mac(app: AppHandle) -> Result<(), String> {
             app_name: app_name.clone(),
         },
     );
-    state
-        .caption
-        .start(app.clone(), plan.target, app_name.clone())?;
+    state.caption.start(
+        app.clone(),
+        session_id,
+        plan.target,
+        app_name.clone(),
+        recognizer,
+    )?;
     let _ = app.emit("caption-started", &app_name);
     Ok(())
 }
@@ -545,7 +561,7 @@ fn live_subtitle_stop(app: AppHandle) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
         state.caption.stop();
-        state.caption_journal.write().clear();
+        state.caption_journal.write().end_session();
         state.caption_status.write().clear();
         if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
             let _ = window.hide();
@@ -792,8 +808,8 @@ fn configure_caption_window(window: &WebviewWindow) {
     // interactive controls, so it should never intercept the user's pointer.
     let _ = window.set_ignore_cursor_events(true);
 
-    let window = window.clone();
-    let _ = window.clone().run_on_main_thread(move || {
+    let ns_window_owner = window.clone();
+    let _ = window.run_on_main_thread(move || {
         use objc2::msg_send;
         use objc2::runtime::{AnyObject, Bool};
 
@@ -802,7 +818,7 @@ fn configure_caption_window(window: &WebviewWindow) {
         const IGNORES_CYCLE: usize = 1 << 6;
         const FULL_SCREEN_AUXILIARY: usize = 1 << 8;
 
-        let Ok(pointer) = window.ns_window() else {
+        let Ok(pointer) = ns_window_owner.ns_window() else {
             return;
         };
         let ns_window = pointer.cast::<AnyObject>();
@@ -967,14 +983,18 @@ mod caption_status_tests {
 
     #[test]
     fn caption_window_has_ipc_capability() {
-        let capability: serde_json::Value =
+        let shared: serde_json::Value =
             serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/caption.json")).unwrap();
         let windows = capability["windows"].as_array().unwrap();
+        let shared_windows = shared["windows"].as_array().unwrap();
 
         assert!(
             windows.iter().any(|window| window == "caption"),
             "the caption webview must be allowed to listen for captions and invoke status commands"
         );
+        assert!(!shared_windows.iter().any(|window| window == "caption"));
     }
 
     #[test]
@@ -1017,6 +1037,23 @@ mod caption_status_tests {
 
         assert!(plan.target.captures_all_system_audio());
         assert_eq!(plan.app_name, "系统音频");
+    }
+
+    #[test]
+    fn frontmost_mode_validates_and_names_the_selected_application() {
+        assert!(caption_capture_plan(LiveSubtitleCaptureMode::FrontmostApp, None).is_err());
+        assert!(caption_capture_plan(
+            LiveSubtitleCaptureMode::FrontmostApp,
+            Some(("app.lumen.translation".into(), "Lumen".into())),
+        )
+        .is_err());
+
+        let plan = caption_capture_plan(
+            LiveSubtitleCaptureMode::FrontmostApp,
+            Some(("com.example.player".into(), String::new())),
+        )
+        .unwrap();
+        assert_eq!(plan.app_name, "com.example.player");
     }
 
     #[test]
@@ -1118,7 +1155,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                         let result = if running {
                             live_subtitle_stop(app.clone())
                         } else {
-                            live_subtitle_start(app.clone())
+                            live_subtitle_start(app.clone()).await
                         };
                         if let Err(err) = result {
                             log::error!("live subtitle toggle failed: {err}");

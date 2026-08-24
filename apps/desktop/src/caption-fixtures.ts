@@ -63,5 +63,5 @@ const fixtures: Record<string, CaptionState> = {
 
 export function captionFixtureState(name: string | null): CaptionState | null {
   if (!name) return null;
-  return fixtures[name] ?? null;
+  return Object.prototype.hasOwnProperty.call(fixtures, name) ? fixtures[name] : null;
 }

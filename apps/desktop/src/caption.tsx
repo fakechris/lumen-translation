@@ -89,6 +89,7 @@ function CaptionOverlay() {
   const [state, dispatch] = useReducer(captionReducer, PREVIEW_STATE ?? initialCaptionState);
   const [settings, setSettings] = useState<Settings | null>(null);
   const statusRevision = useRef(0);
+  const captionSessionActive = useRef(false);
   const captionSessionId = useRef<number | null>(null);
   const lastCaptionEventId = useRef(0);
   const captionTranslationTimers = useRef<Map<string, ScheduledTranslation>>(new Map());
@@ -114,7 +115,14 @@ function CaptionOverlay() {
     };
 
     const applyCaptionEntry = (entry: CaptionOutputEntry) => {
-      if (!shouldAcceptCaptionSession(captionSessionId.current, entry.sessionId)) return;
+      if (
+        !shouldAcceptCaptionSession(
+          captionSessionActive.current,
+          captionSessionId.current,
+          entry.sessionId,
+        )
+      )
+        return;
       if (captionSessionId.current !== entry.sessionId) {
         captionSessionId.current = entry.sessionId;
         lastCaptionEventId.current = 0;
@@ -132,7 +140,14 @@ function CaptionOverlay() {
     };
 
     const applyCaptionSnapshot = (snapshot: CaptionEventSnapshot) => {
-      if (!shouldAcceptCaptionSession(captionSessionId.current, snapshot.sessionId)) return;
+      if (
+        !shouldAcceptCaptionSession(
+          captionSessionActive.current,
+          captionSessionId.current,
+          snapshot.sessionId,
+        )
+      )
+        return;
       if (snapshot.sessionId !== captionSessionId.current) {
         captionSessionId.current = snapshot.sessionId;
         lastCaptionEventId.current = 0;
@@ -142,7 +157,13 @@ function CaptionOverlay() {
     };
 
     const pullCaptionEvents = () => {
-      if (disposed || pullInFlight) return Promise.resolve();
+      if (
+        disposed ||
+        pullInFlight ||
+        !captionSessionActive.current ||
+        document.visibilityState === 'hidden'
+      )
+        return Promise.resolve();
       pullInFlight = true;
       return invoke<CaptionEventSnapshot>('live_subtitle_events', {
         sessionId: captionSessionId.current,
@@ -162,6 +183,7 @@ function CaptionOverlay() {
       }),
       listen<string>('caption-error', (event) => {
         statusRevision.current += 1;
+        captionSessionActive.current = false;
         applyStatus({ kind: 'error', message: event.payload });
       }),
       listen<string>('caption-target', (event) => {
@@ -169,12 +191,18 @@ function CaptionOverlay() {
         applyStatus({ kind: 'target', message: event.payload });
       }),
       listen<CaptionSessionResetEvent>('caption-session-reset', (event) => {
+        statusRevision.current += 1;
+        captionSessionActive.current = true;
         captionSessionId.current = event.payload.sessionId;
         lastCaptionEventId.current = 0;
         dispatch({ type: 'reset' });
         applyStatus({ kind: 'target', message: event.payload.appName });
+        void pullCaptionEvents().catch((error) =>
+          console.warn('[caption] session-start recovery sync failed', error),
+        );
       }),
       listen('caption-stopped', () => {
+        captionSessionActive.current = false;
         captionSessionId.current = null;
         lastCaptionEventId.current = 0;
         dispatch({ type: 'reset' });
@@ -194,17 +222,31 @@ function CaptionOverlay() {
     // recovery path for a WebView reload or a capability/plugin restart.
     void pullStatus().catch((error) => console.warn('[caption] initial status sync failed', error));
     void Promise.all(unlisteners)
-      .then(() => Promise.all([pullStatus(), pullCaptionEvents()]))
+      .then(async () => {
+        const running = await invoke<boolean>('live_subtitle_running');
+        if (disposed) return;
+        captionSessionActive.current = running;
+        await Promise.all([pullStatus(), pullCaptionEvents()]);
+      })
       .catch((error) => console.warn('[caption] listener/status sync failed', error));
     const recoveryTimer = window.setInterval(() => {
       void pullCaptionEvents().catch((error) =>
         console.warn('[caption] event recovery sync failed', error),
       );
     }, 750);
+    const recoverWhenVisible = () => {
+      if (document.visibilityState !== 'hidden' && captionSessionActive.current) {
+        void pullCaptionEvents().catch((error) =>
+          console.warn('[caption] visibility recovery sync failed', error),
+        );
+      }
+    };
+    document.addEventListener('visibilitychange', recoverWhenVisible);
 
     return () => {
       disposed = true;
       window.clearInterval(recoveryTimer);
+      document.removeEventListener('visibilitychange', recoverWhenVisible);
       for (const pending of unlisteners) void pending.then((unlisten) => unlisten());
     };
   }, []);
