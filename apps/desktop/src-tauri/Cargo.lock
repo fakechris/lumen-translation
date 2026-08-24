@@ -2361,7 +2361,6 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 [[package]]
 name = "lumen-asr-engine"
 version = "0.1.0"
-source = "git+https://github.com/fakechris/lumen-suite.git?rev=22c1e6c632f6d4aa76bf761468919f287690075c#22c1e6c632f6d4aa76bf761468919f287690075c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2378,7 +2377,6 @@ dependencies = [
 [[package]]
 name = "lumen-audio"
 version = "0.1.0"
-source = "git+https://github.com/fakechris/lumen-suite.git?rev=22c1e6c632f6d4aa76bf761468919f287690075c#22c1e6c632f6d4aa76bf761468919f287690075c"
 dependencies = [
  "cpal",
  "hound",
@@ -2392,7 +2390,6 @@ dependencies = [
 [[package]]
 name = "lumen-models"
 version = "0.1.0"
-source = "git+https://github.com/fakechris/lumen-suite.git?rev=22c1e6c632f6d4aa76bf761468919f287690075c#22c1e6c632f6d4aa76bf761468919f287690075c"
 dependencies = [
  "fs2",
  "serde",
@@ -2403,7 +2400,6 @@ dependencies = [
 [[package]]
 name = "lumen-platform"
 version = "0.1.0"
-source = "git+https://github.com/fakechris/lumen-suite.git?rev=22c1e6c632f6d4aa76bf761468919f287690075c#22c1e6c632f6d4aa76bf761468919f287690075c"
 dependencies = [
  "async-trait",
  "serde",
@@ -2413,7 +2409,6 @@ dependencies = [
 [[package]]
 name = "lumen-platform-cpal"
 version = "0.1.0"
-source = "git+https://github.com/fakechris/lumen-suite.git?rev=22c1e6c632f6d4aa76bf761468919f287690075c#22c1e6c632f6d4aa76bf761468919f287690075c"
 dependencies = [
  "cpal",
  "lumen-platform",
@@ -2423,7 +2418,6 @@ dependencies = [
 [[package]]
 name = "lumen-platform-macos"
 version = "0.1.0"
-source = "git+https://github.com/fakechris/lumen-suite.git?rev=22c1e6c632f6d4aa76bf761468919f287690075c#22c1e6c632f6d4aa76bf761468919f287690075c"
 dependencies = [
  "async-trait",
  "blake3",

@@ -576,6 +576,23 @@ fn live_subtitle_stop(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// Dynamically toggle mouse click-through for the live caption window.
+#[tauri::command]
+fn set_caption_clickthrough(app: AppHandle, clickthrough: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
+            window.set_ignore_cursor_events(clickthrough).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, clickthrough);
+        Ok(())
+    }
+}
+
 /// Live-subtitle running state, for the tray check item and frontend.
 #[tauri::command]
 fn live_subtitle_running(app: AppHandle) -> bool {
@@ -804,9 +821,10 @@ fn position_caption_window(app: &AppHandle, window: &WebviewWindow) {
 
 #[cfg(target_os = "macos")]
 fn configure_caption_window(window: &WebviewWindow) {
-    // The subtitle content is intentionally click-through. This window has no
-    // interactive controls, so it should never intercept the user's pointer.
-    let _ = window.set_ignore_cursor_events(true);
+    // Keep cursor events active so the overlay controls (close button,
+    // settings shortcut, drag handle) are interactive and responsive.
+    // Click-through can be dynamically toggled via `set_caption_clickthrough`.
+    let _ = window.set_ignore_cursor_events(false);
 
     let ns_window_owner = window.clone();
     let _ = window.run_on_main_thread(move || {
@@ -912,6 +930,7 @@ pub fn run() {
             live_subtitle_status,
             live_subtitle_start,
             live_subtitle_stop,
+            set_caption_clickthrough,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
