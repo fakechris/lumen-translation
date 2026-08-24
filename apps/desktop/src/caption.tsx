@@ -17,7 +17,7 @@ import {
   type CaptionWindowStatus,
 } from './caption-state';
 import { captionFixtureState } from './caption-fixtures';
-import { allProviders, apiKeyFor, loadSettings, type Settings } from './settings';
+import { allProviders, apiKeyFor, DEFAULT_SETTINGS, loadSettings, type Settings } from './settings';
 import { translate, TranslationFailed } from './translate';
 
 const VISIBLE_CAPTIONS = 3;
@@ -56,6 +56,74 @@ interface CaptionSessionResetEvent {
   appName: string;
 }
 
+function SettingsIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function LockIcon({ locked }: { locked: boolean }) {
+  return locked ? (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  ) : (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
 function liveCaptionSettings(settings: Settings): Settings {
   // Live subtitles cannot afford the retry/backoff chain of a rate-limited
   // free endpoint. When the user has configured an LLM, use the first keyed
@@ -88,11 +156,37 @@ function CaptionPair({ line, history }: { line: CaptionLine; history: boolean })
 function CaptionOverlay() {
   const [state, dispatch] = useReducer(captionReducer, PREVIEW_STATE ?? initialCaptionState);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [clickthrough, setClickthrough] = useState(false);
   const statusRevision = useRef(0);
   const captionSessionActive = useRef(false);
   const captionSessionId = useRef<number | null>(null);
   const lastCaptionEventId = useRef(0);
   const captionTranslationTimers = useRef<Map<string, ScheduledTranslation>>(new Map());
+
+  // Escape key closes live subtitles
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        invoke('live_subtitle_stop').catch(console.error);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleClose = () => {
+    invoke('live_subtitle_stop').catch(console.error);
+  };
+
+  const handleOpenSettings = () => {
+    invoke('open_preferences').catch(console.error);
+  };
+
+  const handleToggleClickthrough = () => {
+    const next = !clickthrough;
+    setClickthrough(next);
+    invoke('set_caption_clickthrough', { clickthrough: next }).catch(console.error);
+  };
 
   useEffect(() => {
     if (PREVIEW_STATE) return;
@@ -103,6 +197,13 @@ function CaptionOverlay() {
         // translation-only failure into a full-screen capture error.
         console.warn('[caption] settings unavailable; showing source captions only', error);
       });
+
+    const unlisten = listen<Settings>('settings-changed', (event) => {
+      setSettings((prev) => ({ ...(prev ?? DEFAULT_SETTINGS), ...event.payload }));
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
   }, []);
 
   useEffect(() => {
@@ -334,10 +435,78 @@ function CaptionOverlay() {
 
   const visibleCaptions = state.captions.slice(-VISIBLE_CAPTIONS);
   const hasContent = visibleCaptions.length > 0 || Boolean(state.draft);
+  const isTranslationConfigured = Boolean(
+    settings &&
+    allProviders(settings).some(
+      (provider) => provider.apiStyle === 'openai_compat' && apiKeyFor(settings, provider.id),
+    ),
+  );
 
   return (
     <div className={`caption-overlay${state.error ? ' has-error' : ''}`}>
       <div className="caption-surface">
+        {/* Floating Controls Header */}
+        <div className="caption-header">
+          <div className="caption-header-left">
+            <div
+              className="caption-drag-handle"
+              data-tauri-drag-region
+              title="按住拖拽移动字幕位置"
+            >
+              <span className="caption-drag-dots">⋮⋮</span>
+              <span>Lumen 字幕</span>
+            </div>
+            {state.appName && (
+              <div className="caption-target-badge" title={`正在监听: ${state.appName}`}>
+                <span className={`caption-status-dot${hasContent ? '' : ' idle'}`} />
+                <span>{state.appName}</span>
+              </div>
+            )}
+          </div>
+          <div className="caption-header-right">
+            <button
+              type="button"
+              className={`caption-btn${clickthrough ? ' active' : ''}`}
+              onClick={handleToggleClickthrough}
+              title={
+                clickthrough
+                  ? '穿透模式已开启（点击恢复鼠标交互）'
+                  : '开启穿透模式（点击穿透到底层）'
+              }
+            >
+              <LockIcon locked={clickthrough} />
+            </button>
+            <button
+              type="button"
+              className="caption-btn"
+              onClick={handleOpenSettings}
+              title="偏好设置 (配置翻译模型 API Key)"
+            >
+              <SettingsIcon />
+            </button>
+            <button
+              type="button"
+              className="caption-btn close"
+              onClick={handleClose}
+              title="关闭实时字幕 (Esc)"
+            >
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+
+        {/* Translation warning pill if no LLM key is set */}
+        {!isTranslationConfigured && !state.error && hasContent && (
+          <button
+            type="button"
+            className="caption-warn-pill"
+            onClick={handleOpenSettings}
+            title="点击打开偏好设置配置 LLM API Key (如 DeepSeek / GLM)"
+          >
+            <span>💡 未配置翻译 Key，点击设置</span>
+          </button>
+        )}
+
         {state.error ? (
           <div className="caption-hint error">{state.error}</div>
         ) : (
