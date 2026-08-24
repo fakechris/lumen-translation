@@ -159,6 +159,12 @@ describe('region resolution', () => {
   });
 });
 
+describe('live subtitle capture scope', () => {
+  it('defaults to all system audio so background playback is captured', () => {
+    expect(DEFAULT_SETTINGS.liveSubtitleCaptureMode).toBe('allSystemAudio');
+  });
+});
+
 describe('endpointFor', () => {
   const preset = {
     id: 'minimax',

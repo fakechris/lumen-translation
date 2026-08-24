@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capabilities shared by the translation, preferences, and action-bar windows.",
-  "windows": ["translate", "prefs", "bar"],
+  "windows": ["translate", "prefs", "bar", "caption"],
   "permissions": [
     "core:default",
     "core:app:allow-version",

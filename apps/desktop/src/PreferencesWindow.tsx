@@ -537,6 +537,28 @@ function GeneralTab({ s, update }: TabProps) {
 
   return (
     <>
+      <div className="section-title">Live subtitles</div>
+      <div className="field">
+        <label htmlFor="subtitle-capture">Audio capture</label>
+        <select
+          id="subtitle-capture"
+          value={s.liveSubtitleCaptureMode}
+          onChange={(e) =>
+            update({
+              liveSubtitleCaptureMode: e.target.value as Settings['liveSubtitleCaptureMode'],
+            })
+          }
+        >
+          <option value="allSystemAudio">All system audio (recommended)</option>
+          <option value="frontmostApp">Frontmost app at start only</option>
+        </select>
+      </div>
+      <p className="hint">
+        All system audio keeps captions running when the player or meeting app is in the background,
+        and also hears apps that start playing later. Frontmost-only limits capture to the app
+        selected when subtitles start. Changes apply to the next subtitle session.
+      </p>
+
       <div className="section-title">Endpoint region</div>
       <div className="field">
         <label htmlFor="region">Region</label>
