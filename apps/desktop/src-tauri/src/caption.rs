@@ -339,8 +339,17 @@ impl Worker {
 /// One finalized utterance queued to the Whisper refine thread.
 struct RefineJob {
     utterance: u64,
+    pass1_text: String,
     /// 16 kHz mono f32, the exact samples pass 1 decoded.
     samples: Vec<f32>,
+}
+
+fn chunk_rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
+    (sum_sq / samples.len() as f32).sqrt()
 }
 
 fn run_worker(
@@ -360,6 +369,8 @@ fn run_worker(
     let mut last_partial = String::new();
     // 16 kHz audio of the utterance in flight, for the Whisper refine pass.
     let mut utterance_samples: Vec<f32> = Vec::new();
+    let mut silence_frames: usize = 0;
+    const SILENCE_RMS_THRESHOLD: f32 = 0.0012; // ~-58 dB silence gate
 
     loop {
         if stop.load(Ordering::SeqCst) {
@@ -375,6 +386,16 @@ fn run_worker(
                     } else {
                         lumen_asr_engine::audio::resample_linear(&chunk, capture_rate, TARGET_RATE)
                     };
+                    let is_silent = chunk_rms(&samples) < SILENCE_RMS_THRESHOLD;
+                    if is_silent && utterance_samples.is_empty() {
+                        silence_frames = silence_frames.saturating_add(1);
+                        if silence_frames > 40 {
+                            // Deep silence between sentences: skip feeding empty noise frames
+                            continue;
+                        }
+                    } else {
+                        silence_frames = 0;
+                    }
                     utterance_samples.extend_from_slice(&samples);
                     stream.accept_waveform(&samples, TARGET_RATE);
                 }
@@ -411,6 +432,7 @@ fn run_worker(
                     &refine_enabled,
                     RefineJob {
                         utterance,
+                        pass1_text: text,
                         samples: std::mem::take(&mut utterance_samples),
                     },
                 );
@@ -460,6 +482,15 @@ fn run_worker(
                 }),
             );
         }
+        maybe_enqueue_refine(
+            &refine_tx,
+            &refine_enabled,
+            RefineJob {
+                utterance,
+                pass1_text: text,
+                samples: std::mem::take(&mut utterance_samples),
+            },
+        );
     }
 }
 
@@ -483,6 +514,36 @@ fn maybe_enqueue_refine(
     }
 }
 
+fn resolve_whisper_python() -> PathBuf {
+    for var in ["LUMEN_QWEN_PYTHON", "LUMEN_WHISPER_PYTHON", "LUMEN_PYTHON"] {
+        if let Some(val) = std::env::var_os(var).filter(|v| !v.is_empty()) {
+            let path = PathBuf::from(val);
+            if path.exists() {
+                return path;
+            }
+        }
+    }
+
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        let candidates = [
+            home.join(".lumen/venv/bin/python3"),
+            home.join(".lumen/venv/bin/python"),
+            home.join(".venv/bin/python3"),
+            home.join(".venv/bin/python"),
+            PathBuf::from("/opt/homebrew/bin/python3"),
+            PathBuf::from("/usr/local/bin/python3"),
+            PathBuf::from("/opt/homebrew/Caskroom/miniconda/base/bin/python"),
+        ];
+        for candidate in candidates {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    PathBuf::from("python3")
+}
+
 fn run_refine_worker(
     app: AppHandle,
     session_id: u64,
@@ -491,13 +552,7 @@ fn run_refine_worker(
     enabled: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
 ) {
-    // Python resolution follows lumen-asr's convention: explicit env override,
-    // otherwise the ambient interpreter (needs `mlx_whisper` importable —
-    // same env the ASR app's Qwen/MLX workers use).
-    let python = std::env::var_os("LUMEN_QWEN_PYTHON")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("python3"));
+    let python = resolve_whisper_python();
     let engine = lumen_asr_engine::MlxWhisperAsr::new(lumen_asr_engine::MlxWhisperConfig::product(
         python,
         lumen_asr_engine::DEFAULT_MLX_WHISPER_MODEL,
@@ -517,7 +572,7 @@ fn run_refine_worker(
                     break;
                 }
                 let text = result.text.trim().to_string();
-                if !text.is_empty() {
+                if !text.is_empty() && text != job.pass1_text {
                     publish_caption(
                         &app,
                         session_id,
@@ -549,6 +604,8 @@ fn split_caption_pieces(text: &str) -> Vec<String> {
     for ch in text.chars() {
         current.push(ch);
         if matches!(ch, '。' | '！' | '？' | '…' | '；' | '!' | '?' | '.' | ';') {
+            push_piece(&mut pieces, &mut current);
+        } else if matches!(ch, '，' | ',' | '、' | '—') && current.chars().count() >= 24 {
             push_piece(&mut pieces, &mut current);
         }
     }

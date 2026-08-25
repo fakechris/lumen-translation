@@ -17,15 +17,46 @@ import {
   type CaptionWindowStatus,
 } from './caption-state';
 import { captionFixtureState } from './caption-fixtures';
-import { allProviders, apiKeyFor, DEFAULT_SETTINGS, loadSettings, type Settings } from './settings';
-import { translate, TranslationFailed } from './translate';
+import { TARGET_LANGS } from './lang';
+import {
+  allProviders,
+  apiKeyFor,
+  DEFAULT_SETTINGS,
+  loadSettings,
+  saveSettings,
+  type Settings,
+} from './settings';
+import {
+  translate,
+  TranslationFailed,
+  TranslationFlightController,
+  type TranslateContext,
+} from './translate';
 
-const VISIBLE_CAPTIONS = 3;
+const VISIBLE_CAPTIONS = 8;
 const FINAL_TRANSLATION_SETTLE_MS = 180;
 const DRAFT_TRANSLATION_SETTLE_MS = 320;
 const PREVIEW_STATE = captionFixtureState(
   new URLSearchParams(window.location.search).get('fixture'),
 );
+
+const TARGET_LANG_MAP: Record<string, string> = {
+  'zh-CN': '中文',
+  'zh-TW': '繁体中文',
+  en: 'English',
+  ja: '日本語',
+  ko: '한국어',
+  fr: 'Français',
+  de: 'Deutsch',
+  es: 'Español',
+  ru: 'Русский',
+  it: 'Italiano',
+  pt: 'Português',
+  vi: 'Tiếng Việt',
+  th: 'ไทย',
+  ar: 'العربية',
+  id: 'Bahasa Indonesia',
+};
 
 interface ScheduledTranslation {
   signature: string;
@@ -56,6 +87,116 @@ interface CaptionSessionResetEvent {
   appName: string;
 }
 
+function GlobeIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
+function SubtitlesIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="4" width="20" height="16" rx="3" />
+      <path d="M7 15h3M14 15h3M7 11h10" />
+    </svg>
+  );
+}
+
+function FontSizeIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 19L8.5 7h1L14 19" />
+      <path d="M6 15h6.5" />
+      <path d="M16 19l2.5-6h.8l2.7 6" />
+      <path d="M17.5 16h3.5" />
+    </svg>
+  );
+}
+
+function ExpandIcon({ expanded }: { expanded: boolean }) {
+  return expanded ? (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="4 14 10 14 10 20" />
+      <polyline points="20 10 14 10 14 4" />
+      <line x1="14" y1="10" x2="21" y2="3" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  ) : (
+    <svg
+      viewBox="0 0 24 24"
+      width="13"
+      height="13"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="10"
+      height="10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
 function SettingsIcon() {
   return (
     <svg
@@ -70,38 +211,6 @@ function SettingsIcon() {
     >
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}
-
-function LockIcon({ locked }: { locked: boolean }) {
-  return locked ? (
-    <svg
-      viewBox="0 0 24 24"
-      width="13"
-      height="13"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  ) : (
-    <svg
-      viewBox="0 0 24 24"
-      width="13"
-      height="13"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 9.9-1" />
     </svg>
   );
 }
@@ -135,20 +244,49 @@ function liveCaptionSettings(settings: Settings): Settings {
   return configured ? { ...settings, providerId: configured.id } : settings;
 }
 
-function CaptionPair({ line, history }: { line: CaptionLine; history: boolean }) {
-  // Keep one stable slot while translation is pending: source text uses
-  // the larger translated typography, then becomes the quieter second line
-  // when the translation arrives. That avoids both an ellipsis and a jump.
+function getContextForUtterance(
+  captions: CaptionLine[],
+  currentId?: string,
+): TranslateContext | undefined {
+  const previousLines = captions.filter(
+    (c) => c.id !== currentId && c.sourceText && c.translation,
+  );
+  if (previousLines.length === 0) return undefined;
+  const recent = previousLines.slice(-2);
+  const previousSource = recent.map((c) => c.sourceText).join(' ');
+  const previousTranslation = recent.map((c) => c.translation).join(' ');
+  return { previousSource, previousTranslation };
+}
+
+function CaptionPair({
+  line,
+  history,
+  showOriginal,
+}: {
+  line: CaptionLine;
+  history: boolean;
+  showOriginal: boolean;
+}) {
   const hasTranslation = Boolean(line.translation?.trim());
   return (
     <div
       className={`caption-block ${history ? 'history' : 'committed'}`}
       data-corrected={line.corrected || undefined}
     >
+      {showOriginal && (
+        <div className="caption-line original">
+          {line.sourceText}
+        </div>
+      )}
       <div className="caption-line translation">
-        {hasTranslation ? line.translation : line.sourceText}
+        {hasTranslation ? (
+          line.translation
+        ) : showOriginal ? (
+          <span className="caption-translating-pulse">…</span>
+        ) : (
+          line.sourceText
+        )}
       </div>
-      {hasTranslation && <div className="caption-line original">{line.sourceText}</div>}
     </div>
   );
 }
@@ -156,12 +294,39 @@ function CaptionPair({ line, history }: { line: CaptionLine; history: boolean })
 function CaptionOverlay() {
   const [state, dispatch] = useReducer(captionReducer, PREVIEW_STATE ?? initialCaptionState);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [clickthrough, setClickthrough] = useState(false);
+  const [showOriginal, setShowOriginal] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('lumen_caption_show_original') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large'>(() => {
+    try {
+      return (localStorage.getItem('lumen_caption_font_size') as 'small' | 'medium' | 'large') || 'medium';
+    } catch {
+      return 'medium';
+    }
+  });
+  const [expanded, setExpanded] = useState(false);
+
+  const flowRef = useRef<HTMLDivElement>(null);
   const statusRevision = useRef(0);
   const captionSessionActive = useRef(false);
   const captionSessionId = useRef<number | null>(null);
   const lastCaptionEventId = useRef(0);
   const captionTranslationTimers = useRef<Map<string, ScheduledTranslation>>(new Map());
+  const flightController = useRef(new TranslationFlightController());
+
+  // Auto-scroll to the newest caption
+  useEffect(() => {
+    if (flowRef.current) {
+      flowRef.current.scrollTo({
+        top: flowRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
+  }, [state.captions, state.draft]);
 
   // Escape key closes live subtitles
   useEffect(() => {
@@ -182,10 +347,32 @@ function CaptionOverlay() {
     invoke('open_preferences').catch(console.error);
   };
 
-  const handleToggleClickthrough = () => {
-    const next = !clickthrough;
-    setClickthrough(next);
-    invoke('set_caption_clickthrough', { clickthrough: next }).catch(console.error);
+  const handleToggleOriginal = () => {
+    const next = !showOriginal;
+    setShowOriginal(next);
+    try {
+      localStorage.setItem('lumen_caption_show_original', String(next));
+    } catch {}
+  };
+
+  const handleFontSizeChange = (next: 'small' | 'medium' | 'large') => {
+    setFontSize(next);
+    try {
+      localStorage.setItem('lumen_caption_font_size', next);
+    } catch {}
+  };
+
+  const handleToggleExpand = () => {
+    const next = !expanded;
+    setExpanded(next);
+    invoke('set_caption_expanded', { expanded: next }).catch(console.error);
+  };
+
+  const handleTargetLangChange = (newLang: string) => {
+    if (!settings) return;
+    const nextSettings: Settings = { ...settings, targetLang: newLang };
+    setSettings(nextSettings);
+    saveSettings(nextSettings).catch(console.error);
   };
 
   useEffect(() => {
@@ -353,19 +540,29 @@ function CaptionOverlay() {
   }, []);
 
   useEffect(() => {
-    if (!settings || !state.draft?.sourceText.trim()) return;
+    if (!settings || !state.draft?.sourceText.trim()) {
+      flightController.current.cancelDraft();
+      return;
+    }
 
     const { utterance, sourceText } = state.draft;
+    const context = getContextForUtterance(state.captions);
     const timer = window.setTimeout(() => {
-      translate(sourceText, liveCaptionSettings(settings))
-        .then((result) => {
-          dispatch({
-            type: 'draft-translation',
-            utterance,
-            sourceText,
-            translation: result.translation,
-          });
-        })
+      flightController.current
+        .requestDraft(
+          utterance,
+          sourceText,
+          liveCaptionSettings(settings),
+          (result) => {
+            dispatch({
+              type: 'draft-translation',
+              utterance,
+              sourceText,
+              translation: result.translation,
+            });
+          },
+          context,
+        )
         .catch((error) => {
           if (!(error instanceof TranslationFailed)) {
             console.warn('[caption] draft translation failed', error);
@@ -373,8 +570,10 @@ function CaptionOverlay() {
         });
     }, DRAFT_TRANSLATION_SETTLE_MS);
 
-    return () => window.clearTimeout(timer);
-  }, [settings, state.draft?.sourceText, state.draft?.utterance]);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [settings, state.draft?.sourceText, state.draft?.utterance, state.captions]);
 
   useEffect(() => {
     if (!settings) return;
@@ -386,6 +585,7 @@ function CaptionOverlay() {
       if (!activeIds.has(id) || caption?.translation) {
         window.clearTimeout(scheduled.timer);
         timers.delete(id);
+        flightController.current.cancelFinal(id);
       }
     }
 
@@ -396,20 +596,27 @@ function CaptionOverlay() {
       if (existing?.signature === signature) continue;
       if (existing) window.clearTimeout(existing.timer);
 
+      const context = getContextForUtterance(state.captions, caption.id);
       const timer = window.setTimeout(
         () => {
           const scheduled = timers.get(caption.id);
           if (scheduled?.signature !== signature) return;
           timers.delete(caption.id);
-          translate(caption.sourceText, liveCaptionSettings(settings))
-            .then((result) => {
-              dispatch({
-                type: 'caption-translation',
-                id: caption.id,
-                sourceText: caption.sourceText,
-                translation: result.translation,
-              });
-            })
+          flightController.current
+            .requestFinal(
+              caption.id,
+              caption.sourceText,
+              liveCaptionSettings(settings),
+              (result) => {
+                dispatch({
+                  type: 'caption-translation',
+                  id: caption.id,
+                  sourceText: caption.sourceText,
+                  translation: result.translation,
+                });
+              },
+              context,
+            )
             .catch((error) => {
               if (!(error instanceof TranslationFailed)) {
                 console.warn('[caption] final translation failed', error);
@@ -429,6 +636,7 @@ function CaptionOverlay() {
         window.clearTimeout(scheduled.timer);
       }
       captionTranslationTimers.current.clear();
+      flightController.current.abortAll();
     },
     [],
   );
@@ -442,20 +650,73 @@ function CaptionOverlay() {
     ),
   );
 
+  const currentTargetLangLabel =
+    TARGET_LANG_MAP[settings?.targetLang ?? 'zh-CN'] ??
+    TARGET_LANGS.find((l) => l.code === settings?.targetLang)?.label ??
+    '中文';
+
   return (
-    <div className={`caption-overlay${state.error ? ' has-error' : ''}`}>
-      <div className="caption-surface">
-        {/* Floating Controls Header */}
-        <div className="caption-header">
+    <div
+      className={`caption-overlay${state.error ? ' has-error' : ''}${
+        expanded ? ' is-expanded' : ''
+      }`}
+    >
+      <div className={`caption-surface font-${fontSize}`}>
+        {/* Doubao-style Floating Controls Header */}
+        <div className="caption-header" data-tauri-drag-region>
           <div className="caption-header-left">
-            <div
-              className="caption-drag-handle"
-              data-tauri-drag-region
-              title="按住拖拽移动字幕位置"
-            >
-              <span className="caption-drag-dots">⋮⋮</span>
-              <span>Lumen 字幕</span>
+            {/* 1. Target Language Dropdown */}
+            <div className="caption-select-wrapper" title="选择目标翻译语言">
+              <GlobeIcon />
+              <span className="caption-select-label">
+                翻译为: {currentTargetLangLabel}
+              </span>
+              <ChevronDownIcon />
+              <select
+                className="caption-select-hidden"
+                value={settings?.targetLang ?? 'zh-CN'}
+                onChange={(e) => handleTargetLangChange(e.target.value)}
+              >
+                {TARGET_LANGS.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.label}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {/* 2. Original Text Toggle Button */}
+            <button
+              type="button"
+              className={`caption-pill-btn${showOriginal ? ' active' : ''}`}
+              onClick={handleToggleOriginal}
+              title={showOriginal ? '点击关闭原文（仅保留译文）' : '点击显示原文'}
+            >
+              <SubtitlesIcon />
+              <span>{showOriginal ? '关闭原文' : '显示原文'}</span>
+            </button>
+
+            {/* 3. Font Size Dropdown */}
+            <div className="caption-select-wrapper" title="切换字幕字体大小">
+              <FontSizeIcon />
+              <span className="caption-select-label">
+                {fontSize === 'small' ? '小号字体' : fontSize === 'large' ? '大号字体' : '中号字体'}
+              </span>
+              <ChevronDownIcon />
+              <select
+                className="caption-select-hidden"
+                value={fontSize}
+                onChange={(e) =>
+                  handleFontSizeChange(e.target.value as 'small' | 'medium' | 'large')
+                }
+              >
+                <option value="small">小号字体</option>
+                <option value="medium">中号字体</option>
+                <option value="large">大号字体</option>
+              </select>
+            </div>
+
+            {/* Listening target app badge */}
             {state.appName && (
               <div className="caption-target-badge" title={`正在监听: ${state.appName}`}>
                 <span className={`caption-status-dot${hasContent ? '' : ' idle'}`} />
@@ -463,30 +724,33 @@ function CaptionOverlay() {
               </div>
             )}
           </div>
+
           <div className="caption-header-right">
+            {/* 4. Expand / Collapse Subtitles */}
             <button
               type="button"
-              className={`caption-btn${clickthrough ? ' active' : ''}`}
-              onClick={handleToggleClickthrough}
-              title={
-                clickthrough
-                  ? '穿透模式已开启（点击恢复鼠标交互）'
-                  : '开启穿透模式（点击穿透到底层）'
-              }
+              className={`caption-pill-btn${expanded ? ' active' : ''}`}
+              onClick={handleToggleExpand}
+              title={expanded ? '收起历史字幕' : '展开历史字幕'}
             >
-              <LockIcon locked={clickthrough} />
+              <ExpandIcon expanded={expanded} />
+              <span>{expanded ? '收起字幕' : '展开字幕'}</span>
             </button>
+
+            {/* 5. Settings */}
             <button
               type="button"
-              className="caption-btn"
+              className="caption-icon-btn"
               onClick={handleOpenSettings}
               title="偏好设置 (配置翻译模型 API Key)"
             >
               <SettingsIcon />
             </button>
+
+            {/* 6. Close */}
             <button
               type="button"
-              className="caption-btn close"
+              className="caption-icon-btn close"
               onClick={handleClose}
               title="关闭实时字幕 (Esc)"
             >
@@ -516,31 +780,35 @@ function CaptionOverlay() {
                 {state.appName ? `正在听 ${state.appName}…` : '正在启动字幕…'}
               </div>
             )}
-            <div className="caption-flow">
+            <div className="caption-flow" ref={flowRef}>
+              <div className="caption-flow-spacer" />
               {visibleCaptions.map((line, index) => (
                 <CaptionPair
                   key={line.id}
                   line={line}
                   history={index < visibleCaptions.length - 1}
+                  showOriginal={showOriginal}
                 />
               ))}
               {state.draft && (
                 <div className="caption-block draft" key={`draft-${state.draft.utterance}`}>
+                  {showOriginal && (
+                    <div className="caption-line original draft-original">
+                      <span className="draft-stable">
+                        {state.draft.sourceText.slice(0, state.draft.stablePrefixLength)}
+                      </span>
+                      <span className="draft-mutable">
+                        {state.draft.sourceText.slice(state.draft.stablePrefixLength)}
+                      </span>
+                    </div>
+                  )}
                   <div
                     className={`caption-line translation draft-translation${
                       state.draft.translation ? '' : ' placeholder'
                     }`}
                     aria-hidden={!state.draft.translation}
                   >
-                    {state.draft.translation ?? ' '}
-                  </div>
-                  <div className="caption-line original draft-original">
-                    <span className="draft-stable">
-                      {state.draft.sourceText.slice(0, state.draft.stablePrefixLength)}
-                    </span>
-                    <span className="draft-mutable">
-                      {state.draft.sourceText.slice(state.draft.stablePrefixLength)}
-                    </span>
+                    {state.draft.translation ?? (showOriginal ? ' ' : state.draft.sourceText)}
                   </div>
                 </div>
               )}

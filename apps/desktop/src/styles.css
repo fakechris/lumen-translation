@@ -433,7 +433,7 @@ button:focus-visible {
   position: relative;
   width: 100%;
   height: 100%;
-  padding: 8px;
+  padding: 4px;
   font-family:
     -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Segoe UI', sans-serif;
   box-sizing: border-box;
@@ -446,21 +446,39 @@ button:focus-visible {
   justify-content: flex-end;
   width: 100%;
   height: 100%;
-  padding: 38px 36px 16px;
+  padding: 44px 22px 14px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 18px;
-  background: rgba(15, 16, 20, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(30, 32, 38, 0.96);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
   backdrop-filter: blur(28px) saturate(180%);
   box-shadow:
-    0 16px 40px rgba(0, 0, 0, 0.55),
-    0 2px 10px rgba(0, 0, 0, 0.35),
+    0 16px 44px rgba(0, 0, 0, 0.65),
+    0 2px 10px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.14);
   box-sizing: border-box;
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease;
+}
+
+.caption-surface.font-small {
+  --caption-trans-size: 18px;
+  --caption-orig-size: 13.5px;
+  --caption-draft-size: 17px;
+}
+
+.caption-surface.font-medium {
+  --caption-trans-size: 21px;
+  --caption-orig-size: 15px;
+  --caption-draft-size: 20px;
+}
+
+.caption-surface.font-large {
+  --caption-trans-size: 25px;
+  --caption-orig-size: 17.5px;
+  --caption-draft-size: 24px;
 }
 
 .caption-overlay:hover .caption-surface {
@@ -470,79 +488,184 @@ button:focus-visible {
 .caption-overlay.has-error .caption-surface {
   align-items: center;
   justify-content: center;
-  background: rgba(28, 16, 16, 0.92);
-  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(28, 16, 16, 0.96);
+  border-color: rgba(239, 68, 68, 0.45);
 }
 
 /* ------------------------------------------------------------------ */
-/* Floating Controls Chrome Header                                    */
+/* Doubao-style Floating Controls Header                              */
 /* ------------------------------------------------------------------ */
 
 .caption-header {
   position: absolute;
-  top: 8px;
-  left: 12px;
-  right: 12px;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  height: 28px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
   z-index: 20;
-  opacity: 0;
-  transition: opacity 0.2s ease-in-out;
-  pointer-events: none;
+  opacity: 0.85;
+  transition: opacity 0.15s ease-in-out;
+  cursor: grab;
+  -webkit-app-region: drag;
+  user-select: none;
 }
 
 .caption-overlay:hover .caption-header,
 .caption-overlay:focus-within .caption-header {
   opacity: 1;
-  pointer-events: auto;
 }
 
 .caption-header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
-.caption-drag-handle {
-  display: inline-flex;
+.caption-header-right {
+  display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.caption-select-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 11px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 11.5px;
   font-weight: 500;
-  cursor: grab;
-  -webkit-app-region: drag;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.caption-select-wrapper:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.caption-select-wrapper svg {
+  color: rgba(255, 255, 255, 0.7);
+  flex-shrink: 0;
+}
+
+.caption-select-label {
   white-space: nowrap;
 }
 
-.caption-drag-handle:active {
-  cursor: grabbing;
+.caption-select-hidden {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-.caption-drag-dots {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 13px;
-  letter-spacing: -1px;
+.caption-select-hidden option {
+  background: #1f2128;
+  color: #fff;
+}
+
+.caption-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+
+.caption-pill-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.caption-pill-btn.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.caption-pill-btn svg {
+  color: rgba(255, 255, 255, 0.7);
+  flex-shrink: 0;
+}
+
+.caption-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+
+.caption-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.caption-icon-btn.close:hover {
+  background: rgba(239, 68, 68, 0.88);
+  color: #fff;
+  border-color: rgba(239, 68, 68, 1);
+}
+
+.caption-icon-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
 }
 
 .caption-target-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  max-width: 220px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.75);
+  max-width: 160px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.7);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -563,52 +686,6 @@ button:focus-visible {
   box-shadow: 0 0 6px #eab308;
 }
 
-.caption-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.caption-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.8);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  outline: none;
-}
-
-.caption-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
-.caption-btn.active {
-  background: rgba(59, 130, 246, 0.5);
-  color: #fff;
-  border-color: rgba(59, 130, 246, 0.7);
-}
-
-.caption-btn.close:hover {
-  background: rgba(239, 68, 68, 0.75);
-  color: #fff;
-  border-color: rgba(239, 68, 68, 0.9);
-}
-
-.caption-btn svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
-}
-
 /* ------------------------------------------------------------------ */
 /* Banner & Hints                                                     */
 /* ------------------------------------------------------------------ */
@@ -618,7 +695,7 @@ button:focus-visible {
   color: rgba(255, 255, 255, 0.78);
   font-size: 14px;
   line-height: 1.5;
-  text-align: center;
+  text-align: left;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
@@ -632,13 +709,13 @@ button:focus-visible {
 
 .caption-warn-pill {
   position: absolute;
-  top: 10px;
+  top: 40px;
   left: 50%;
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2px 10px;
+  padding: 3px 12px;
   border-radius: 12px;
   background: rgba(234, 179, 8, 0.2);
   border: 1px solid rgba(234, 179, 8, 0.4);
@@ -648,6 +725,7 @@ button:focus-visible {
   z-index: 15;
   transition: background 0.15s ease;
   white-space: nowrap;
+  -webkit-app-region: no-drag;
 }
 
 .caption-warn-pill:hover {
@@ -661,21 +739,34 @@ button:focus-visible {
 .caption-flow {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   gap: 12px;
+  width: 100%;
+  height: 100%;
   min-height: 0;
-  overflow: hidden;
-  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.85) 12%, #000 24%);
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  scroll-behavior: smooth;
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.85) 6%, #000 16%);
+}
+
+.caption-flow::-webkit-scrollbar {
+  display: none;
+}
+
+.caption-flow-spacer {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .caption-block {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
-  animation: caption-promote 300ms cubic-bezier(0.2, 0.8, 0.25, 1);
-  transition: opacity 180ms ease;
+  animation: caption-promote 260ms cubic-bezier(0.2, 0.8, 0.25, 1);
+  transition: opacity 180ms ease, background-color 300ms ease;
 }
 
 .caption-block.history:first-child {
@@ -683,42 +774,58 @@ button:focus-visible {
 }
 
 .caption-block.history:not(:first-child) {
-  opacity: 0.76;
+  opacity: 0.72;
+}
+
+.caption-block.committed {
+  opacity: 1;
+}
+
+.caption-block[data-corrected] {
+  animation: caption-refined 400ms ease-out;
+}
+
+.caption-translating-pulse {
+  display: inline-block;
+  color: rgba(255, 255, 255, 0.5);
+  animation: caption-pulse 1.2s infinite ease-in-out;
 }
 
 .caption-line {
   width: 100%;
   color: #ffffff;
-  line-height: 1.34;
-  text-align: center;
+  line-height: 1.45;
+  text-align: left;
   overflow-wrap: anywhere;
   text-shadow:
     0 1px 2px rgba(0, 0, 0, 0.95),
     0 2px 8px rgba(0, 0, 0, 0.85);
 }
 
+.caption-line.original {
+  color: #9ca3af;
+  font-size: var(--caption-orig-size, 15px);
+  font-weight: 400;
+  line-height: 1.4;
+  margin-bottom: 3px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
 .caption-line.translation {
-  font-size: 24px;
+  font-size: var(--caption-trans-size, 21px);
   font-weight: 600;
   letter-spacing: 0.01em;
   color: #ffffff;
 }
 
-.caption-line.original {
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 17px;
-  font-weight: 400;
-  line-height: 1.36;
-}
-
 .caption-block.draft {
-  min-height: 58px;
-  gap: 3px;
+  min-height: 48px;
+  gap: 2px;
 }
 
 .caption-line.draft-translation {
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 22px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: var(--caption-draft-size, 20px);
   font-weight: 500;
 }
 
@@ -727,16 +834,18 @@ button:focus-visible {
 }
 
 .caption-line.draft-original {
-  color: inherit;
-  font-size: 17px;
+  color: #9ca3af;
+  font-size: var(--caption-orig-size, 15px);
 }
 
 .draft-stable {
-  color: rgba(255, 255, 255, 0.86);
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 450;
 }
 
 .draft-mutable {
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(255, 255, 255, 0.65);
+  font-style: normal;
 }
 
 @keyframes caption-promote {
@@ -748,6 +857,25 @@ button:focus-visible {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes caption-refined {
+  0% {
+    background-color: rgba(59, 130, 246, 0.18);
+    border-radius: 6px;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes caption-pulse {
+  0%, 100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.9;
   }
 }
 

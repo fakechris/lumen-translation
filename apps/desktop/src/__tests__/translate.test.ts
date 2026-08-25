@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, newCustomProvider, type Settings } from "../settings";
-import { fallbackChain } from "../translate";
+import {
+  contextAwareUserContent,
+  fallbackChain,
+  TranslationFlightController,
+} from "../translate";
 
 /**
  * The fallback chain is what stops a rate-limited Google endpoint from looking
@@ -13,6 +17,103 @@ function settings(overrides: Partial<Settings> = {}): Settings {
 }
 
 const ids = (s: Settings) => fallbackChain(s).map((p) => p.id);
+
+describe("contextAwareUserContent", () => {
+  it("returns text verbatim when no context is provided", () => {
+    expect(contextAwareUserContent("hello world", undefined)).toBe("hello world");
+    expect(
+      contextAwareUserContent("hello world", { previousSource: "", previousTranslation: "" }),
+    ).toBe("hello world");
+  });
+
+  it("includes previous source and translation context cleanly", () => {
+    const formatted = contextAwareUserContent("Now let's examine the data.", {
+      previousSource: "We are studying neural networks.",
+      previousTranslation: "我们正在研究神经网络。",
+    });
+    expect(formatted).toContain("Previous source context: We are studying neural networks.");
+    expect(formatted).toContain("Previous translation context: 我们正在研究神经网络。");
+    expect(formatted).toContain("--- Text to translate ---\nNow let's examine the data.");
+  });
+});
+
+describe("TranslationFlightController", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("cancels previous in-flight draft when new draft arrives", async () => {
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 30);
+        signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+      return {
+        ok: true,
+        status: 200,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify([[["测试", "test", null, null, 1]], null, "en"]),
+          ),
+        json: () =>
+          Promise.resolve([[["测试", "test", null, null, 1]], null, "en"]),
+        headers: { get: () => null },
+      } as unknown as Response;
+    });
+
+    const controller = new TranslationFlightController();
+    const results: string[] = [];
+
+    const p1 = controller.requestDraft(
+      1,
+      "first draft",
+      settings({ providerId: "google_translate" }),
+      (res) => results.push(res.translation),
+    );
+    const p2 = controller.requestDraft(
+      1,
+      "second draft",
+      settings({ providerId: "google_translate" }),
+      (res) => results.push(res.translation),
+    );
+
+    await Promise.allSettled([p1, p2]);
+    expect(results).toEqual(["测试"]);
+  });
+
+  it("handles final translation flight requests and slot cancellation", async () => {
+    globalThis.fetch = vi.fn(async () => {
+      return {
+        ok: true,
+        status: 200,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify([[["最终结果", "final", null, null, 1]], null, "en"]),
+          ),
+        json: () =>
+          Promise.resolve([[["最终结果", "final", null, null, 1]], null, "en"]),
+        headers: { get: () => null },
+      } as unknown as Response;
+    });
+
+    const controller = new TranslationFlightController();
+    const results: string[] = [];
+
+    await controller.requestFinal(
+      "utterance-1",
+      "final text",
+      settings({ providerId: "google_translate" }),
+      (res) => results.push(res.translation),
+    );
+
+    expect(results).toEqual(["最终结果"]);
+  });
+});
 
 describe("fallbackChain", () => {
   it("puts the user's selection first", () => {
@@ -96,3 +197,4 @@ describe("fallbackChain", () => {
     expect(ids(s)[0]).toBe("openrouter");
   });
 });
+

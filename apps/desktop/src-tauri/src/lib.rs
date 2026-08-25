@@ -58,17 +58,16 @@ const BAR_SIZE: (f64, f64) = (96.0, 36.0);
 const BAR_CURSOR_GAP: f64 = 14.0;
 
 #[cfg(target_os = "macos")]
-const CAPTION_HEIGHT: f64 = 280.0;
+const CAPTION_HEIGHT: f64 = 176.0;
 #[cfg(target_os = "macos")]
-const CAPTION_WIDTH_RATIO: f64 = 0.82;
+const CAPTION_WIDTH_RATIO: f64 = 0.65;
 #[cfg(target_os = "macos")]
-const CAPTION_MIN_WIDTH: f64 = 720.0;
+const CAPTION_MIN_WIDTH: f64 = 620.0;
 #[cfg(target_os = "macos")]
-const CAPTION_MAX_WIDTH: f64 = 1440.0;
-/// Use the visible work-area top plus a 12 pt inset. Tauri reports the full
-/// monitor frame here, so include the standard 25 pt menu-bar allowance.
+const CAPTION_MAX_WIDTH: f64 = 1080.0;
+/// Margin from the bottom of the screen (above the Dock).
 #[cfg(target_os = "macos")]
-const CAPTION_TOP_OFFSET: f64 = 37.0;
+const CAPTION_BOTTOM_OFFSET: f64 = 64.0;
 #[cfg(target_os = "macos")]
 const CAPTION_ERROR_VISIBLE_FOR: Duration = Duration::from_secs(4);
 
@@ -447,7 +446,8 @@ async fn live_subtitle_start(app: AppHandle) -> Result<(), String> {
                 .write()
                 .publish(status.clone());
             show_caption_window(&app, status);
-            schedule_caption_error_dismiss(app, revision);
+            schedule_caption_error_dismiss(app.clone(), revision);
+            tray::refresh(&app, &TrayIconId::new(TRAY_ID));
             return Err(err);
         }
         Ok(())
@@ -514,6 +514,7 @@ async fn live_subtitle_start_mac(app: AppHandle) -> Result<(), String> {
         recognizer,
     )?;
     let _ = app.emit("caption-started", &app_name);
+    tray::refresh(&app, &TrayIconId::new(TRAY_ID));
     Ok(())
 }
 
@@ -567,6 +568,7 @@ fn live_subtitle_stop(app: AppHandle) -> Result<(), String> {
             let _ = window.hide();
         }
         let _ = app.emit("caption-stopped", ());
+        tray::refresh(&app, &TrayIconId::new(TRAY_ID));
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
@@ -589,6 +591,33 @@ fn set_caption_clickthrough(app: AppHandle, clickthrough: bool) -> Result<(), St
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (app, clickthrough);
+        Ok(())
+    }
+}
+
+/// Dynamically expand or collapse the caption window height while keeping
+/// the bottom position anchored.
+#[tauri::command]
+fn set_caption_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
+            let current_size = window.inner_size().map_err(|e| e.to_string())?;
+            let current_pos = window.inner_position().map_err(|e| e.to_string())?;
+            let scale = window.scale_factor().map_err(|e| e.to_string())?;
+            let compact_h = (176.0 * scale).round() as u32;
+            let expanded_h = (400.0 * scale).round() as u32;
+            let target_h = if expanded { expanded_h } else { compact_h };
+            let diff = target_h as i32 - current_size.height as i32;
+            let target_y = current_pos.y - diff;
+            let _ = window.set_size(tauri::PhysicalSize::new(current_size.width, target_h));
+            let _ = window.set_position(tauri::PhysicalPosition::new(current_pos.x, target_y));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, expanded);
         Ok(())
     }
 }
@@ -781,13 +810,15 @@ fn caption_window_geometry(
         CAPTION_MIN_WIDTH.min(logical_width),
         CAPTION_MAX_WIDTH.min(logical_width),
     );
-    let height = CAPTION_HEIGHT.min((logical_height - CAPTION_TOP_OFFSET).max(88.0));
+    let height = CAPTION_HEIGHT.min((logical_height - CAPTION_BOTTOM_OFFSET).max(88.0));
     let physical_width = (width * scale).round() as u32;
     let physical_height = (height * scale).round() as u32;
+    let physical_bottom_offset = (CAPTION_BOTTOM_OFFSET * scale).round() as u32;
 
     CaptionWindowGeometry {
         x: monitor_x + ((monitor_width.saturating_sub(physical_width)) / 2) as i32,
-        y: monitor_y + (CAPTION_TOP_OFFSET * scale).round() as i32,
+        y: monitor_y
+            + (monitor_height.saturating_sub(physical_height + physical_bottom_offset)) as i32,
         width: physical_width,
         height: physical_height,
     }
@@ -822,8 +853,7 @@ fn position_caption_window(app: &AppHandle, window: &WebviewWindow) {
 #[cfg(target_os = "macos")]
 fn configure_caption_window(window: &WebviewWindow) {
     // Keep cursor events active so the overlay controls (close button,
-    // settings shortcut, drag handle) are interactive and responsive.
-    // Click-through can be dynamically toggled via `set_caption_clickthrough`.
+    // settings shortcut, drag handle) are always interactive and responsive.
     let _ = window.set_ignore_cursor_events(false);
 
     let ns_window_owner = window.clone();
@@ -915,6 +945,15 @@ pub fn run() {
                 })
                 .build(),
         )
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == WINDOW_CAPTION {
+                    api.prevent_close();
+                    let _ = live_subtitle_stop(window.app_handle().clone());
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
@@ -931,6 +970,7 @@ pub fn run() {
             live_subtitle_start,
             live_subtitle_stop,
             set_caption_clickthrough,
+            set_caption_expanded,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -1076,14 +1116,14 @@ mod caption_status_tests {
     }
 
     #[test]
-    fn caption_window_matches_top_center_geometry() {
+    fn caption_window_matches_bottom_center_geometry() {
         assert_eq!(
             caption_window_geometry(0, 0, 3024, 1964, 2.0),
             CaptionWindowGeometry {
-                x: 272,
-                y: 74,
-                width: 2480,
-                height: 560,
+                x: 529,
+                y: 1484,
+                width: 1966,
+                height: 352,
             }
         );
     }

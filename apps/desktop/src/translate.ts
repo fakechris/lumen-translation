@@ -125,6 +125,33 @@ function hardCut(str: string, maxChars: number): string[] {
   return out;
 }
 
+export interface TranslateContext {
+  previousSource?: string;
+  previousTranslation?: string;
+}
+
+/**
+ * Format context for live subtitles or single-sentence streaming translation.
+ * Delivers previous 1-2 sentences as context to ensure pronoun, tense, and
+ * terminology coherence without polluting the translated output.
+ */
+export function contextAwareUserContent(
+  text: string,
+  context: TranslateContext | undefined,
+): string {
+  if (!context || (!context.previousSource && !context.previousTranslation)) {
+    return text;
+  }
+  const parts: string[] = [];
+  if (context.previousSource?.trim()) {
+    parts.push(`Previous source context: ${context.previousSource.trim().slice(0, 400)}`);
+  }
+  if (context.previousTranslation?.trim()) {
+    parts.push(`Previous translation context: ${context.previousTranslation.trim().slice(0, 400)}`);
+  }
+  return `Context for continuity (do NOT re-translate, do NOT repeat context in output):\n${parts.join('\n')}\n\n--- Text to translate ---\n${text}`;
+}
+
 /**
  * User message for one chunk of a split long selection. Single-chunk texts
  * go through verbatim; later chunks carry the previous chunk's translation
@@ -158,6 +185,7 @@ export interface TranslateOptions {
    */
   onPartial?: (partial: string, engineLabel: string) => void;
   signal?: AbortSignal;
+  context?: TranslateContext;
 }
 
 export class TranslationFailed extends Error {}
@@ -232,16 +260,20 @@ async function attemptOne(
   opts: TranslateOptions,
 ): Promise<string> {
   const engine = engineFor(preset, s);
-  // Only LLM providers carry the previous chunk's translation as context;
-  // the free MT engines translate each chunk verbatim.
+  // Only LLM providers carry context; the free MT engines translate each chunk verbatim.
   const hasContext =
     preset.apiStyle !== 'google_translate' && preset.apiStyle !== 'microsoft_translator';
   const parts: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
     if (opts.signal?.aborted) throw new TranslationFailed('aborted');
-    const text = hasContext
-      ? chunkUserContent(chunks[i], i > 0 ? parts[i - 1] : undefined, i, chunks.length)
-      : chunks[i];
+    let text = chunks[i];
+    if (hasContext) {
+      if (chunks.length > 1) {
+        text = chunkUserContent(chunks[i], i > 0 ? parts[i - 1] : undefined, i, chunks.length);
+      } else if (opts.context) {
+        text = contextAwareUserContent(chunks[0], opts.context);
+      }
+    }
     const req = {
       pair: { source: s.sourceLang, target: s.targetLang },
       segments: [{ id: String(i), text }],
@@ -253,6 +285,7 @@ async function attemptOne(
     if (opts.onPartial && engine.translateStream) {
       let last = '';
       for await (const seg of engine.translateStream(req)) {
+        if (opts.signal?.aborted) throw new TranslationFailed('aborted');
         last = seg.text;
         opts.onPartial([...parts, last].join('\n\n'), preset.label);
       }
@@ -260,7 +293,9 @@ async function attemptOne(
       if (!out) throw new TranslationFailed('empty response');
       parts.push(out);
     } else {
+      if (opts.signal?.aborted) throw new TranslationFailed('aborted');
       const res = await engine.translate(req);
+      if (opts.signal?.aborted) throw new TranslationFailed('aborted');
       const out = (res.segments[0]?.text ?? '').trim();
       if (!out) throw new TranslationFailed('empty response');
       parts.push(out);
@@ -291,9 +326,144 @@ export async function translate(
       const translation = await attemptOne(preset, chunks, s, opts);
       return { translation, engine: preset.label };
     } catch (err) {
+      if (opts.signal?.aborted) throw new TranslationFailed('aborted');
       lastError = `${preset.label}: ${(err as Error).message}`;
       console.warn(`[lumen] ${preset.id} failed; trying next provider`, err);
     }
   }
   throw new TranslationFailed(lastError);
 }
+
+interface FlightRequest {
+  id: string;
+  sourceText: string;
+  abortController: AbortController;
+}
+
+/**
+ * Flight controller for streaming live subtitles.
+ * Manages AbortControllers to cancel obsolete in-flight draft translations
+ * and deduplicate / cancel superseded final translations.
+ */
+export class TranslationFlightController {
+  private draftFlight: FlightRequest | null = null;
+  private finalFlights: Map<string, FlightRequest> = new Map();
+
+  /**
+   * Schedule or dispatch a draft (partial) translation.
+   * Cancels any previously in-flight draft translation.
+   */
+  async requestDraft(
+    utterance: number,
+    sourceText: string,
+    settings: Settings,
+    onSuccess: (result: TranslationResult) => void,
+    context?: TranslateContext,
+  ): Promise<void> {
+    const trimmed = sourceText.trim();
+    if (!trimmed) {
+      this.cancelDraft();
+      return;
+    }
+    // Cancel prior draft flight
+    this.cancelDraft();
+
+    const abortController = new AbortController();
+    const flight: FlightRequest = {
+      id: `draft-${utterance}`,
+      sourceText: trimmed,
+      abortController,
+    };
+    this.draftFlight = flight;
+
+    try {
+      const result = await translate(trimmed, settings, {
+        signal: abortController.signal,
+        context,
+      });
+      if (this.draftFlight === flight && !abortController.signal.aborted) {
+        this.draftFlight = null;
+        onSuccess(result);
+      }
+    } catch (err) {
+      if (this.draftFlight === flight) {
+        this.draftFlight = null;
+      }
+      if (err instanceof TranslationFailed && err.message === 'aborted') {
+        return;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Schedule or dispatch a final (committed or refined) caption translation.
+   * Cancels any previously in-flight translation for the same utterance ID.
+   */
+  async requestFinal(
+    id: string,
+    sourceText: string,
+    settings: Settings,
+    onSuccess: (result: TranslationResult) => void,
+    context?: TranslateContext,
+  ): Promise<void> {
+    const trimmed = sourceText.trim();
+    if (!trimmed) {
+      this.cancelFinal(id);
+      return;
+    }
+    // Cancel prior flight for this utterance slot
+    this.cancelFinal(id);
+
+    const abortController = new AbortController();
+    const flight: FlightRequest = {
+      id,
+      sourceText: trimmed,
+      abortController,
+    };
+    this.finalFlights.set(id, flight);
+
+    try {
+      const result = await translate(trimmed, settings, {
+        signal: abortController.signal,
+        context,
+      });
+      if (this.finalFlights.get(id) === flight && !abortController.signal.aborted) {
+        this.finalFlights.delete(id);
+        onSuccess(result);
+      }
+    } catch (err) {
+      if (this.finalFlights.get(id) === flight) {
+        this.finalFlights.delete(id);
+      }
+      if (err instanceof TranslationFailed && err.message === 'aborted') {
+        return;
+      }
+      throw err;
+    }
+  }
+
+  cancelDraft(): void {
+    if (this.draftFlight) {
+      this.draftFlight.abortController.abort();
+      this.draftFlight = null;
+    }
+  }
+
+  cancelFinal(id: string): void {
+    const flight = this.finalFlights.get(id);
+    if (flight) {
+      flight.abortController.abort();
+      this.finalFlights.delete(id);
+    }
+  }
+
+  abortAll(): void {
+    this.cancelDraft();
+    for (const flight of this.finalFlights.values()) {
+      flight.abortController.abort();
+    }
+    this.finalFlights.clear();
+  }
+}
+
