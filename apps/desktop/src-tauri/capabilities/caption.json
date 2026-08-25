@@ -7,7 +7,11 @@
     "core:default",
     "core:event:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-show",
     "core:window:allow-hide",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-scale-factor",
     "core:window:allow-set-ignore-cursor-events",
     {
       "identifier": "http:default",

@@ -17,5 +17,7 @@ coverage
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+.cargo
+.claude
 # Generated userscript (built by apps/userscript; shipped via Releases)
 /lumen.user.js
