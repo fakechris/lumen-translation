@@ -380,6 +380,11 @@ export class TranslationFlightController {
       const result = await translate(trimmed, settings, {
         signal: abortController.signal,
         context,
+        onPartial: (partialText, engineLabel) => {
+          if (this.draftFlight === flight && !abortController.signal.aborted) {
+            onSuccess({ translation: partialText, engine: engineLabel });
+          }
+        },
       });
       if (this.draftFlight === flight && !abortController.signal.aborted) {
         this.draftFlight = null;
@@ -427,6 +432,11 @@ export class TranslationFlightController {
       const result = await translate(trimmed, settings, {
         signal: abortController.signal,
         context,
+        onPartial: (partialText, engineLabel) => {
+          if (this.finalFlights.get(id) === flight && !abortController.signal.aborted) {
+            onSuccess({ translation: partialText, engine: engineLabel });
+          }
+        },
       });
       if (this.finalFlights.get(id) === flight && !abortController.signal.aborted) {
         this.finalFlights.delete(id);

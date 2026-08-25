@@ -48,9 +48,9 @@ const AUDIO_QUEUE_CAPACITY: usize = 480;
 /// user will still be watching by then).
 const REFINE_MAX_SECONDS: f64 = 30.0;
 
-/// Soft caption width before hard-cutting (CJK reading width, cluster
-/// research: 1–2 lines × ~30–42 chars).
-const CAPTION_MAX_CHARS: usize = 42;
+/// Soft visual width before cutting (1 Chinese char = 2, 1 ASCII char = 1).
+/// 60 visual width corresponds to ~30 CJK characters or ~10-14 English words.
+const CAPTION_MAX_VISUAL_WIDTH: usize = 60;
 
 const IDLE_POLL: Duration = Duration::from_millis(50);
 
@@ -387,10 +387,10 @@ fn run_worker(
                         lumen_asr_engine::audio::resample_linear(&chunk, capture_rate, TARGET_RATE)
                     };
                     let is_silent = chunk_rms(&samples) < SILENCE_RMS_THRESHOLD;
-                    if is_silent && utterance_samples.is_empty() {
+                    if is_silent && utterance_samples.is_empty() && last_partial.is_empty() {
                         silence_frames = silence_frames.saturating_add(1);
-                        if silence_frames > 40 {
-                            // Deep silence between sentences: skip feeding empty noise frames
+                        if silence_frames > 60 {
+                            // Deep silence when completely idle: skip feeding empty noise frames
                             continue;
                         }
                     } else {
@@ -410,7 +410,8 @@ fn run_worker(
         stream.decode();
         revision += 1;
         if stream.is_endpoint() {
-            let text = stream.result().text;
+            let raw_text = stream.result().text;
+            let text = clean_asr_text(&raw_text);
             if !text.trim().is_empty() {
                 utterance += 1;
                 for (seq, piece) in split_caption_pieces(&text).into_iter().enumerate() {
@@ -442,7 +443,8 @@ fn run_worker(
             stream.reset();
             last_partial.clear();
         } else {
-            let text = stream.result().text;
+            let raw_text = stream.result().text;
+            let text = clean_asr_text(&raw_text);
             if text != last_partial && !text.trim().is_empty() {
                 publish_caption(
                     &app,
@@ -464,7 +466,8 @@ fn run_worker(
     // Flush trailing context so the last utterance is not lost mid-word.
     stream.input_finished();
     stream.decode();
-    let text = stream.result().text;
+    let raw_text = stream.result().text;
+    let text = clean_asr_text(&raw_text);
     if !text.trim().is_empty() {
         utterance += 1;
         revision += 1;
@@ -514,8 +517,20 @@ fn maybe_enqueue_refine(
     }
 }
 
+fn has_mlx_whisper(python: &std::path::Path) -> bool {
+    std::process::Command::new(python)
+        .arg("-c")
+        .arg("import mlx_whisper")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 fn resolve_whisper_python() -> PathBuf {
-    for var in ["LUMEN_QWEN_PYTHON", "LUMEN_WHISPER_PYTHON", "LUMEN_PYTHON"] {
+    // 1. Explicit Lumen override environment variables
+    for var in ["LUMEN_WHISPER_PYTHON", "LUMEN_PYTHON", "LUMEN_QWEN_PYTHON"] {
         if let Some(val) = std::env::var_os(var).filter(|v| !v.is_empty()) {
             let path = PathBuf::from(val);
             if path.exists() {
@@ -524,20 +539,67 @@ fn resolve_whisper_python() -> PathBuf {
         }
     }
 
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        let candidates = [
-            home.join(".lumen/venv/bin/python3"),
-            home.join(".lumen/venv/bin/python"),
-            home.join(".venv/bin/python3"),
-            home.join(".venv/bin/python"),
-            PathBuf::from("/opt/homebrew/bin/python3"),
-            PathBuf::from("/usr/local/bin/python3"),
-            PathBuf::from("/opt/homebrew/Caskroom/miniconda/base/bin/python"),
-        ];
-        for candidate in candidates {
-            if candidate.exists() {
+    // 2. Currently active VirtualEnv or Conda environment
+    for var in ["VIRTUAL_ENV", "CONDA_PREFIX"] {
+        if let Some(prefix) = std::env::var_os(var).filter(|v| !v.is_empty()) {
+            let base = PathBuf::from(prefix);
+            let candidate = base.join("bin/python3");
+            if candidate.exists() && has_mlx_whisper(&candidate) {
                 return candidate;
             }
+            let candidate_alt = base.join("bin/python");
+            if candidate_alt.exists() && has_mlx_whisper(&candidate_alt) {
+                return candidate_alt;
+            }
+        }
+    }
+
+    // 3. Scan standard Lumen central venv and common environment candidates
+    let mut candidates = Vec::new();
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        // Standard Lumen central venv (~/.lumen/venv)
+        candidates.push(home.join(".lumen/venv/bin/python3"));
+        candidates.push(home.join(".lumen/venv/bin/python"));
+        candidates.push(home.join(".venv/bin/python3"));
+        candidates.push(home.join(".venv/bin/python"));
+
+        // Common conda and virtualenv search paths
+        let conda_env_dirs = [
+            home.join(".conda/envs"),
+            home.join("miniconda3/envs"),
+            home.join("anaconda3/envs"),
+            home.join("miniforge3/envs"),
+            PathBuf::from("/opt/homebrew/Caskroom/miniconda/base/envs"),
+        ];
+        for env_dir in conda_env_dirs {
+            if let Ok(entries) = std::fs::read_dir(env_dir) {
+                for entry in entries.flatten() {
+                    let py3 = entry.path().join("bin/python3");
+                    if py3.exists() {
+                        candidates.push(py3);
+                    }
+                }
+            }
+        }
+
+        candidates.push(home.join(".local/bin/python3"));
+        candidates.push(PathBuf::from("/opt/homebrew/bin/python3"));
+        candidates.push(PathBuf::from("/usr/local/bin/python3"));
+        candidates.push(PathBuf::from("/opt/homebrew/Caskroom/miniconda/base/bin/python3"));
+    }
+
+    // Return the first candidate that actually has mlx_whisper installed
+    for candidate in &candidates {
+        if candidate.exists() && has_mlx_whisper(candidate) {
+            return candidate.clone();
+        }
+    }
+
+    // Fallback: preferred default is ~/.lumen/venv/bin/python3 if it exists, otherwise system python3
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        let lumen_default = home.join(".lumen/venv/bin/python3");
+        if lumen_default.exists() {
+            return lumen_default;
         }
     }
 
@@ -553,6 +615,7 @@ fn run_refine_worker(
     stop: Arc<AtomicBool>,
 ) {
     let python = resolve_whisper_python();
+    log::info!("MLX Whisper refine worker started using python: {}", python.display());
     let engine = lumen_asr_engine::MlxWhisperAsr::new(lumen_asr_engine::MlxWhisperConfig::product(
         python,
         lumen_asr_engine::DEFAULT_MLX_WHISPER_MODEL,
@@ -573,6 +636,12 @@ fn run_refine_worker(
                 }
                 let text = result.text.trim().to_string();
                 if !text.is_empty() && text != job.pass1_text {
+                    log::info!(
+                        "Utterance {} refined by Whisper: {:?} -> {:?}",
+                        job.utterance,
+                        job.pass1_text,
+                        text
+                    );
                     publish_caption(
                         &app,
                         session_id,
@@ -596,38 +665,138 @@ fn run_refine_worker(
     }
 }
 
+/// Clean common streaming ASR repetition artifacts (adjacent duplicate words).
+fn clean_asr_text(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.is_empty() {
+        return String::new();
+    }
+    let mut cleaned = Vec::with_capacity(words.len());
+    let mut prev_word_lower = String::new();
+    for word in words {
+        let clean = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+        if !clean.is_empty() && clean == prev_word_lower {
+            continue;
+        }
+        prev_word_lower = clean;
+        cleaned.push(word);
+    }
+    cleaned.join(" ")
+}
+
+/// Computes visual display width (CJK = 2, ASCII/Latin = 1).
+fn visual_width(s: &str) -> usize {
+    s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
+}
+
 /// Split a finalized utterance into caption-shaped pieces at sentence
-/// punctuation; hard-cut any piece wider than [`CAPTION_MAX_CHARS`].
+/// punctuation; cuts long pieces at natural word boundaries or punctuation.
 fn split_caption_pieces(text: &str) -> Vec<String> {
-    let mut pieces: Vec<String> = Vec::new();
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let chars: Vec<char> = trimmed.chars().collect();
+    let len = chars.len();
+    let mut sentences: Vec<String> = Vec::new();
     let mut current = String::new();
-    for ch in text.chars() {
+
+    let mut i = 0;
+    while i < len {
+        let ch = chars[i];
         current.push(ch);
-        if matches!(ch, '。' | '！' | '？' | '…' | '；' | '!' | '?' | '.' | ';') {
-            push_piece(&mut pieces, &mut current);
-        } else if matches!(ch, '，' | ',' | '、' | '—') && current.chars().count() >= 24 {
-            push_piece(&mut pieces, &mut current);
+
+        let is_cjk_end = matches!(ch, '。' | '！' | '？' | '；' | '…');
+        let is_latin_excl_or_q = matches!(ch, '!' | '?' | ';')
+            && (i + 1 == len || chars[i + 1].is_whitespace() || matches!(chars[i + 1], '"' | '\''));
+        let is_latin_period = if ch == '.' {
+            let prev_digit = i > 0 && chars[i - 1].is_ascii_digit();
+            let next_digit = i + 1 < len && chars[i + 1].is_ascii_digit();
+            let is_decimal = prev_digit && next_digit;
+            let followed_by_space_or_end = i + 1 == len || chars[i + 1].is_whitespace() || matches!(chars[i + 1], '"' | '\'');
+            !is_decimal && followed_by_space_or_end
+        } else {
+            false
+        };
+
+        // Long pause at comma
+        let is_long_comma = matches!(ch, '，' | ',')
+            && visual_width(&current) >= 40
+            && (i + 1 == len || chars[i + 1].is_whitespace());
+
+        if is_cjk_end || is_latin_excl_or_q || is_latin_period || is_long_comma {
+            let s = current.trim();
+            if !s.is_empty() {
+                sentences.push(s.to_string());
+            }
+            current.clear();
+        }
+
+        i += 1;
+    }
+
+    let remaining = current.trim();
+    if !remaining.is_empty() {
+        sentences.push(remaining.to_string());
+    }
+
+    let mut pieces: Vec<String> = Vec::new();
+    for sentence in sentences {
+        if visual_width(&sentence) <= CAPTION_MAX_VISUAL_WIDTH {
+            pieces.push(sentence);
+        } else {
+            split_long_sentence(&sentence, &mut pieces, CAPTION_MAX_VISUAL_WIDTH);
         }
     }
-    push_piece(&mut pieces, &mut current);
     pieces
 }
 
-fn push_piece(pieces: &mut Vec<String>, current: &mut String) {
-    let trimmed = current.trim();
-    if trimmed.is_empty() {
-        current.clear();
-        return;
-    }
-    let chars: Vec<char> = trimmed.chars().collect();
-    if chars.len() <= CAPTION_MAX_CHARS {
-        pieces.push(trimmed.to_string());
-    } else {
-        for chunk in chars.chunks(CAPTION_MAX_CHARS) {
-            pieces.push(chunk.iter().collect());
+fn split_long_sentence(sentence: &str, pieces: &mut Vec<String>, max_width: usize) {
+    let mut remaining: String = sentence.trim().to_string();
+    while visual_width(&remaining) > max_width {
+        let chars: Vec<char> = remaining.chars().collect();
+        let total_chars = chars.len();
+
+        // Find character index where visual width hits max_width
+        let mut limit_char_idx = total_chars;
+        let mut width_acc = 0;
+        for (idx, &c) in chars.iter().enumerate() {
+            width_acc += if c.is_ascii() { 1 } else { 2 };
+            if width_acc > max_width {
+                limit_char_idx = idx;
+                break;
+            }
         }
+
+        // Look for the best cut point backwards (space or punctuation)
+        let min_cut = (limit_char_idx / 2).max(1);
+        let mut best_cut = None;
+        for idx in (min_cut..=limit_char_idx.min(total_chars - 1)).rev() {
+            let c = chars[idx];
+            if c.is_whitespace() || matches!(c, '，' | ',' | '、' | '—' | '；' | ';') {
+                best_cut = Some(idx + 1);
+                break;
+            }
+        }
+
+        let cut_pos = best_cut.unwrap_or(limit_char_idx.max(1));
+        let head: String = chars[..cut_pos].iter().collect();
+        let tail: String = chars[cut_pos..].iter().collect();
+        let head_trimmed = head.trim();
+        if !head_trimmed.is_empty() {
+            pieces.push(head_trimmed.to_string());
+        }
+        remaining = tail.trim().to_string();
     }
-    current.clear();
+    let last = remaining.trim();
+    if !last.is_empty() {
+        pieces.push(last.to_string());
+    }
 }
 
 /// Streaming Paraformer dir iff macOS + model installed. `None` everywhere
@@ -651,13 +820,28 @@ pub fn load_streaming_recognizer() -> Result<lumen_asr_engine::StreamingRecogniz
             default_streaming_dir().display()
         )
     })?;
-    lumen_asr_engine::StreamingRecognizer::from_dir(&streaming_dir)
+    let paths = lumen_asr_engine::ParaformerStreamingModelPaths::discover(&streaming_dir).ok_or_else(|| {
+        format!(
+            "streaming Paraformer model files missing under {}",
+            streaming_dir.display()
+        )
+    })?;
+    let config = lumen_asr_engine::StreamingEndpointConfig {
+        rule1_min_trailing_silence: 1.5,
+        rule2_min_trailing_silence: 0.55,
+        rule3_min_utterance_length: 6.5,
+        num_threads: 2,
+    };
+    lumen_asr_engine::StreamingRecognizer::with_config(paths, config)
         .map_err(|error| format!("could not load streaming model: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{split_caption_pieces, CaptionEvent, CaptionEventJournal, CaptionOutput};
+    use super::{
+        clean_asr_text, split_caption_pieces, visual_width, CaptionEvent, CaptionEventJournal,
+        CaptionOutput,
+    };
 
     fn partial(revision: u64, text: &str) -> CaptionOutput {
         CaptionOutput::Partial(CaptionEvent {
@@ -725,10 +909,55 @@ mod tests {
     }
 
     #[test]
-    fn hard_cuts_oversized_pieces() {
-        let text = "一".repeat(90);
+    fn splits_english_sentences_naturally() {
+        let pieces = split_caption_pieces("Hello everyone, welcome! Today we will discuss Rust. Are you ready?");
+        assert_eq!(
+            pieces,
+            vec![
+                "Hello everyone, welcome!",
+                "Today we will discuss Rust.",
+                "Are you ready?"
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_decimals_in_english_sentences() {
+        let pieces = split_caption_pieces("The price is $3.14 per unit. Version 2.0 is out!");
+        assert_eq!(
+            pieces,
+            vec!["The price is $3.14 per unit.", "Version 2.0 is out!"]
+        );
+    }
+
+    #[test]
+    fn cleans_stuttered_asr_repeated_words() {
+        let text = "in the way that steve jobs art art in the he ran's company company to way they heating";
+        let cleaned = clean_asr_text(text);
+        assert_eq!(
+            cleaned,
+            "in the way that steve jobs art in the he ran's company to way they heating"
+        );
+    }
+
+    #[test]
+    fn cuts_oversized_english_without_slicing_words() {
+        let text = "We are currently implementing a high performance real-time audio and speech translation engine that runs entirely on Apple Silicon Metal";
+        let pieces = split_caption_pieces(text);
+        assert!(pieces.len() >= 2);
+        for piece in &pieces {
+            assert!(visual_width(piece) <= 60);
+            // Verify no partial broken word at edges
+            assert!(!piece.starts_with(' '));
+            assert!(!piece.ends_with(' '));
+        }
+    }
+
+    #[test]
+    fn hard_cuts_oversized_cjk_pieces() {
+        let text = "一".repeat(150);
         let pieces = split_caption_pieces(&text);
-        assert_eq!(pieces.len(), 3);
-        assert!(pieces.iter().all(|p| p.chars().count() <= 42));
+        assert!(pieces.len() >= 3);
+        assert!(pieces.iter().all(|p| visual_width(p) <= 60));
     }
 }

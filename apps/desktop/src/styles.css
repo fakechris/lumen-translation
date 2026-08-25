@@ -31,8 +31,18 @@
   box-sizing: border-box;
 }
 
-body {
+html {
+  width: 100%;
+  height: 100%;
   margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
   /* Every window is a borderless, transparent Tauri window: the rounded card
      is drawn by the document, not by the OS frame. */
   background: transparent;
@@ -424,6 +434,9 @@ button:focus-visible {
 .caption-body > #root {
   width: 100%;
   height: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
   background: transparent;
   overflow: hidden;
   user-select: none;
@@ -431,8 +444,11 @@ button:focus-visible {
 
 .caption-overlay {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
+  min-height: 100vh;
   padding: 4px;
   font-family:
     -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Segoe UI', sans-serif;
@@ -442,10 +458,11 @@ button:focus-visible {
 .caption-surface {
   position: relative;
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
-  justify-content: flex-end;
   width: 100%;
   height: 100%;
+  min-height: 0;
   padding: 44px 22px 14px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -464,21 +481,21 @@ button:focus-visible {
 }
 
 .caption-surface.font-small {
-  --caption-trans-size: 18px;
+  --caption-trans-size: 15px;
   --caption-orig-size: 13.5px;
-  --caption-draft-size: 17px;
+  --caption-draft-size: 15px;
 }
 
 .caption-surface.font-medium {
-  --caption-trans-size: 21px;
+  --caption-trans-size: 17.5px;
   --caption-orig-size: 15px;
-  --caption-draft-size: 20px;
+  --caption-draft-size: 17.5px;
 }
 
 .caption-surface.font-large {
-  --caption-trans-size: 25px;
-  --caption-orig-size: 17.5px;
-  --caption-draft-size: 24px;
+  --caption-trans-size: 20.5px;
+  --caption-orig-size: 17px;
+  --caption-draft-size: 20.5px;
 }
 
 .caption-overlay:hover .caption-surface {
@@ -691,11 +708,17 @@ button:focus-visible {
 /* ------------------------------------------------------------------ */
 
 .caption-hint {
-  margin: auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   color: rgba(255, 255, 255, 0.78);
   font-size: 14px;
   line-height: 1.5;
-  text-align: left;
+  text-align: center;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
@@ -738,15 +761,15 @@ button:focus-visible {
 
 .caption-flow {
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  height: 100%;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  scroll-behavior: smooth;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.85) 6%, #000 16%);
   mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, 0.85) 6%, #000 16%);
 }
 
@@ -761,7 +784,7 @@ button:focus-visible {
 
 .caption-block {
   display: flex;
-  flex: none;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 2px;
   width: 100%;
@@ -803,30 +826,34 @@ button:focus-visible {
 }
 
 .caption-line.original {
-  color: #9ca3af;
+  color: rgba(255, 255, 255, 0.72);
   font-size: var(--caption-orig-size, 15px);
   font-weight: 400;
   line-height: 1.4;
-  margin-bottom: 3px;
+  margin-bottom: 2px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
 
 .caption-line.translation {
-  font-size: var(--caption-trans-size, 21px);
-  font-weight: 600;
+  font-size: var(--caption-trans-size, 17.5px);
+  font-weight: 550;
   letter-spacing: 0.01em;
   color: #ffffff;
 }
 
 .caption-block.draft {
-  min-height: 48px;
+  min-height: 44px;
   gap: 2px;
 }
 
 .caption-line.draft-translation {
-  color: rgba(255, 255, 255, 0.82);
-  font-size: var(--caption-draft-size, 20px);
-  font-weight: 500;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: var(--caption-draft-size, 17.5px);
+  font-weight: 550;
+}
+
+.caption-line.draft-translation.pending {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .caption-line.draft-translation.placeholder {
@@ -834,7 +861,7 @@ button:focus-visible {
 }
 
 .caption-line.draft-original {
-  color: #9ca3af;
+  color: rgba(255, 255, 255, 0.72);
   font-size: var(--caption-orig-size, 15px);
 }
 

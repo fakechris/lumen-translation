@@ -2,6 +2,7 @@
 // scrollback history → current committed bilingual caption → mutable draft.
 // The streaming pass owns immediacy; Whisper can revise an utterance later,
 // and the revised translation is backfilled without moving that utterance.
+import './http-bridge';
 import './styles.css';
 import { StrictMode, useEffect, useReducer, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -19,6 +20,7 @@ import {
 import { captionFixtureState } from './caption-fixtures';
 import { TARGET_LANGS } from './lang';
 import {
+  activeProvider,
   allProviders,
   apiKeyFor,
   DEFAULT_SETTINGS,
@@ -34,8 +36,9 @@ import {
 } from './translate';
 
 const VISIBLE_CAPTIONS = 8;
-const FINAL_TRANSLATION_SETTLE_MS = 180;
-const DRAFT_TRANSLATION_SETTLE_MS = 320;
+const FINAL_TRANSLATION_SETTLE_MS = 60;
+const DRAFT_TRANSLATION_SETTLE_MS = 80;
+const DRAFT_MAX_WAIT_MS = 220;
 const PREVIEW_STATE = captionFixtureState(
   new URLSearchParams(window.location.search).get('fixture'),
 );
@@ -234,10 +237,12 @@ function CloseIcon() {
 }
 
 function liveCaptionSettings(settings: Settings): Settings {
-  // Live subtitles cannot afford the retry/backoff chain of a rate-limited
-  // free endpoint. When the user has configured an LLM, use the first keyed
-  // provider directly for this latency-sensitive surface. Normal selection
-  // translation keeps the user's ordinary provider order unchanged.
+  // If the user's active provider is a free MT engine or has an API key set, use it.
+  // Otherwise, if any OpenAI-compatible provider is keyed, prefer it for lower latency.
+  const active = activeProvider(settings);
+  if (!active.needsKey || apiKeyFor(settings, active.id)) {
+    return settings;
+  }
   const configured = allProviders(settings).find(
     (provider) => provider.apiStyle === 'openai_compat' && apiKeyFor(settings, provider.id),
   );
@@ -317,14 +322,12 @@ function CaptionOverlay() {
   const lastCaptionEventId = useRef(0);
   const captionTranslationTimers = useRef<Map<string, ScheduledTranslation>>(new Map());
   const flightController = useRef(new TranslationFlightController());
+  const lastDraftDispatchedAt = useRef<number>(0);
 
-  // Auto-scroll to the newest caption
+  // Auto-scroll to the newest caption (instant scroll to avoid WebKit animation queue freezing)
   useEffect(() => {
     if (flowRef.current) {
-      flowRef.current.scrollTo({
-        top: flowRef.current.scrollHeight,
-        behavior: 'smooth',
-      });
+      flowRef.current.scrollTop = flowRef.current.scrollHeight;
     }
   }, [state.captions, state.draft]);
 
@@ -547,7 +550,15 @@ function CaptionOverlay() {
 
     const { utterance, sourceText } = state.draft;
     const context = getContextForUtterance(state.captions);
+    const now = Date.now();
+    const elapsed = now - lastDraftDispatchedAt.current;
+    const delay =
+      elapsed >= DRAFT_MAX_WAIT_MS
+        ? DRAFT_TRANSLATION_SETTLE_MS
+        : Math.max(DRAFT_TRANSLATION_SETTLE_MS, DRAFT_MAX_WAIT_MS - elapsed);
+
     const timer = window.setTimeout(() => {
+      lastDraftDispatchedAt.current = Date.now();
       flightController.current
         .requestDraft(
           utterance,
@@ -568,7 +579,7 @@ function CaptionOverlay() {
             console.warn('[caption] draft translation failed', error);
           }
         });
-    }, DRAFT_TRANSLATION_SETTLE_MS);
+    }, delay);
 
     return () => {
       window.clearTimeout(timer);
@@ -645,9 +656,11 @@ function CaptionOverlay() {
   const hasContent = visibleCaptions.length > 0 || Boolean(state.draft);
   const isTranslationConfigured = Boolean(
     settings &&
-    allProviders(settings).some(
-      (provider) => provider.apiStyle === 'openai_compat' && apiKeyFor(settings, provider.id),
-    ),
+      (!activeProvider(settings).needsKey ||
+        Boolean(apiKeyFor(settings, settings.providerId)) ||
+        allProviders(settings).some(
+          (provider) => provider.apiStyle === 'openai_compat' && apiKeyFor(settings, provider.id),
+        )),
   );
 
   const currentTargetLangLabel =
@@ -773,47 +786,45 @@ function CaptionOverlay() {
 
         {state.error ? (
           <div className="caption-hint error">{state.error}</div>
+        ) : !hasContent ? (
+          <div className="caption-hint">
+            <span className="caption-status-dot idle" />
+            <span>{state.appName ? `正在听 ${state.appName}…` : '正在启动字幕…'}</span>
+          </div>
         ) : (
-          <>
-            {!hasContent && (
-              <div className="caption-hint">
-                {state.appName ? `正在听 ${state.appName}…` : '正在启动字幕…'}
+          <div className="caption-flow" ref={flowRef}>
+            <div className="caption-flow-spacer" />
+            {visibleCaptions.map((line, index) => (
+              <CaptionPair
+                key={line.id}
+                line={line}
+                history={index < visibleCaptions.length - 1}
+                showOriginal={showOriginal}
+              />
+            ))}
+            {state.draft && (
+              <div className="caption-block draft" key={`draft-${state.draft.utterance}`}>
+                {showOriginal && (
+                  <div className="caption-line original draft-original">
+                    <span className="draft-stable">
+                      {state.draft.sourceText.slice(0, state.draft.stablePrefixLength)}
+                    </span>
+                    <span className="draft-mutable">
+                      {state.draft.sourceText.slice(state.draft.stablePrefixLength)}
+                    </span>
+                  </div>
+                )}
+                <div
+                  className={`caption-line translation draft-translation${
+                    state.draft.translation ? '' : ' pending'
+                  }`}
+                  aria-hidden={!state.draft.translation && showOriginal}
+                >
+                  {state.draft.translation ?? (showOriginal ? ' ' : state.draft.sourceText)}
+                </div>
               </div>
             )}
-            <div className="caption-flow" ref={flowRef}>
-              <div className="caption-flow-spacer" />
-              {visibleCaptions.map((line, index) => (
-                <CaptionPair
-                  key={line.id}
-                  line={line}
-                  history={index < visibleCaptions.length - 1}
-                  showOriginal={showOriginal}
-                />
-              ))}
-              {state.draft && (
-                <div className="caption-block draft" key={`draft-${state.draft.utterance}`}>
-                  {showOriginal && (
-                    <div className="caption-line original draft-original">
-                      <span className="draft-stable">
-                        {state.draft.sourceText.slice(0, state.draft.stablePrefixLength)}
-                      </span>
-                      <span className="draft-mutable">
-                        {state.draft.sourceText.slice(state.draft.stablePrefixLength)}
-                      </span>
-                    </div>
-                  )}
-                  <div
-                    className={`caption-line translation draft-translation${
-                      state.draft.translation ? '' : ' placeholder'
-                    }`}
-                    aria-hidden={!state.draft.translation}
-                  >
-                    {state.draft.translation ?? (showOriginal ? ' ' : state.draft.sourceText)}
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
+          </div>
         )}
       </div>
     </div>
