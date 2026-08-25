@@ -104,7 +104,8 @@ export function captionReducer(state: CaptionState, action: CaptionAction): Capt
 
       const previous = state.draft?.utterance === event.utterance ? state.draft : null;
       const stablePrefixLength = previous ? commonPrefixLength(previous.sourceText, sourceText) : 0;
-      const translation = previous?.sourceText === sourceText ? previous.translation : undefined;
+      // Retain the existing draft translation while speech in the same utterance continues
+      const translation = previous?.translation;
 
       return {
         ...state,
@@ -216,10 +217,7 @@ export function captionReducer(state: CaptionState, action: CaptionAction): Capt
       };
 
     case 'draft-translation':
-      if (
-        state.draft?.utterance !== action.utterance ||
-        state.draft.sourceText !== action.sourceText
-      ) {
+      if (state.draft?.utterance !== action.utterance) {
         return state;
       }
       return {

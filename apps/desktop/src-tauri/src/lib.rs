@@ -58,13 +58,15 @@ const BAR_SIZE: (f64, f64) = (96.0, 36.0);
 const BAR_CURSOR_GAP: f64 = 14.0;
 
 #[cfg(target_os = "macos")]
-const CAPTION_HEIGHT: f64 = 176.0;
+const CAPTION_HEIGHT: f64 = 240.0;
 #[cfg(target_os = "macos")]
-const CAPTION_WIDTH_RATIO: f64 = 0.65;
+const CAPTION_EXPANDED_HEIGHT: f64 = 440.0;
 #[cfg(target_os = "macos")]
-const CAPTION_MIN_WIDTH: f64 = 620.0;
+const CAPTION_WIDTH_RATIO: f64 = 0.72;
 #[cfg(target_os = "macos")]
-const CAPTION_MAX_WIDTH: f64 = 1080.0;
+const CAPTION_MIN_WIDTH: f64 = 720.0;
+#[cfg(target_os = "macos")]
+const CAPTION_MAX_WIDTH: f64 = 1200.0;
 /// Margin from the bottom of the screen (above the Dock).
 #[cfg(target_os = "macos")]
 const CAPTION_BOTTOM_OFFSET: f64 = 64.0;
@@ -605,8 +607,8 @@ fn set_caption_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
             let current_size = window.inner_size().map_err(|e| e.to_string())?;
             let current_pos = window.inner_position().map_err(|e| e.to_string())?;
             let scale = window.scale_factor().map_err(|e| e.to_string())?;
-            let compact_h = (176.0 * scale).round() as u32;
-            let expanded_h = (400.0 * scale).round() as u32;
+            let compact_h = (CAPTION_HEIGHT * scale).round() as u32;
+            let expanded_h = (CAPTION_EXPANDED_HEIGHT * scale).round() as u32;
             let target_h = if expanded { expanded_h } else { compact_h };
             let diff = target_h as i32 - current_size.height as i32;
             let target_y = current_pos.y - diff;
@@ -1120,10 +1122,10 @@ mod caption_status_tests {
         assert_eq!(
             caption_window_geometry(0, 0, 3024, 1964, 2.0),
             CaptionWindowGeometry {
-                x: 529,
-                y: 1484,
-                width: 1966,
-                height: 352,
+                x: 423,
+                y: 1356,
+                width: 2177,
+                height: 480,
             }
         );
     }
