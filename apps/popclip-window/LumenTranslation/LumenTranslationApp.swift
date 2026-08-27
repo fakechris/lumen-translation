@@ -32,47 +32,12 @@ enum LumenTranslationMain {
   }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-  private var statusItem: NSStatusItem!
+final class AppDelegate: NSObject, NSApplicationDelegate {
   private var reopenHotKey: GlobalHotKey?
-  // Rebuilt each time it opens, so newly added custom slots appear and the
-  // active provider stays checkmarked.
-  private let engineMenu = NSMenu(title: "Engine")
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     ProcessInfo.processInfo.disableAutomaticTermination("lumen-popclip-window")
     ProcessInfo.processInfo.disableSuddenTermination()
-
-    // Status bar item: since LSUIElement apps have no Dock icon or app menu,
-    // we expose Preferences + Quit via NSStatusItem.
-    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    if let btn = statusItem.button {
-      let icon = NSImage(contentsOfFile: Bundle.main.path(forResource: "statusicon", ofType: "png") ?? "")
-      if let icon {
-        icon.size = NSSize(width: 18, height: 18)
-        icon.isTemplate = true
-        btn.image = icon
-      } else {
-        btn.image = NSImage(systemSymbolName: "character.bubble", accessibilityDescription: "Lumen")
-      }
-    }
-    let menu = NSMenu()
-    let reopenItem = menu.addItem(
-      withTitle: "Show Last Translation", action: #selector(showLastTranslation), keyEquivalent: "l")
-    reopenItem.keyEquivalentModifierMask = [.command, .option]
-    reopenItem.target = self
-    menu.addItem(NSMenuItem.separator())
-    // Quick engine switch: pick the active provider without opening Settings.
-    let engineItem = menu.addItem(withTitle: "Engine", action: nil, keyEquivalent: "")
-    engineMenu.delegate = self
-    engineItem.submenu = engineMenu
-    menu.addItem(NSMenuItem.separator())
-    let prefsItem = menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
-    prefsItem.target = self
-    menu.addItem(NSMenuItem.separator())
-    let quitItem = menu.addItem(withTitle: "Quit Lumen Translation", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    quitItem.target = NSApplication.shared
-    statusItem.menu = menu
 
     // Global hotkey ⌥⌘L: re-show the last translation from any app, keeping
     // its original source + translation context.
@@ -88,27 +53,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   @objc private func openPreferences() {
     PreferencesWindowController.show()
-  }
-
-  @objc private func selectEngine(_ sender: NSMenuItem) {
-    guard let id = sender.representedObject as? String else { return }
-    Preferences.shared.providerId = id
-  }
-
-  // NSMenuDelegate: rebuild the engine list on open so custom slots and the
-  // active-provider checkmark stay current.
-  func menuNeedsUpdate(_ menu: NSMenu) {
-    guard menu === engineMenu else { return }
-    menu.removeAllItems()
-    let prefs = Preferences.shared
-    let currentId = prefs.providerId
-    for preset in prefs.allProviders {
-      let item = menu.addItem(
-        withTitle: preset.label, action: #selector(selectEngine(_:)), keyEquivalent: "")
-      item.target = self
-      item.representedObject = preset.id
-      item.state = (preset.id == currentId) ? .on : .off
-    }
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
