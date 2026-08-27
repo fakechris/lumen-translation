@@ -49,6 +49,9 @@ running_installed_pids() {
 }
 
 stop_installed_app() {
+  # Reap any legacy LumenTranslation native/popclip processes
+  pkill -f "LumenTranslation.app/Contents/MacOS/LumenTranslation" 2>/dev/null || true
+
   local pids
   pids="$(running_installed_pids)"
   [[ -z "$pids" ]] && return 0
