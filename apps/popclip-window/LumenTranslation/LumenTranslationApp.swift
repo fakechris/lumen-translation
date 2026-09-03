@@ -238,6 +238,12 @@ final class TranslateWindowController: NSWindowController, NSWindowDelegate {
   }
 
   func show(payload: TranslationPayload) {
+    if !Thread.isMainThread {
+      DispatchQueue.main.async { [self] in
+        show(payload: payload)
+      }
+      return
+    }
     NSLog("[LumenTranslation] show() enter isMain=\(Thread.isMainThread)")
     lastPayload = payload
     if self.window == nil {

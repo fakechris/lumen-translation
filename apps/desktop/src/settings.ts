@@ -50,10 +50,44 @@ export interface Settings {
   /** Selections longer than this are truncated before translating. */
   maxSelectionChars: number;
   launchAtLogin: boolean;
+  showDockIcon: boolean;
   /** Re-show the last translation. Tauri accelerator syntax. */
   hotkeyShowLast: string;
   /** Translate the current selection without going through the action bar. */
   hotkeyTranslateSelection: string;
+  /** Read system clipboard and translate its content immediately. */
+  hotkeyTranslateClipboard: string;
+}
+
+export function isMacOS(): boolean {
+  if (typeof navigator !== 'undefined') {
+    return /Mac|iPhone|iPod|iPad/i.test(navigator.userAgent || navigator.platform || '');
+  }
+  return false;
+}
+
+export function formatShortcutDisplay(accelerator: string, mac = isMacOS()): string {
+  if (!accelerator || !accelerator.trim()) return '';
+  if (mac) {
+    const parts = accelerator.split('+').map((p) => p.trim()).filter(Boolean);
+    return parts
+      .map((part) => {
+        const lower = part.toLowerCase();
+        if (lower === 'command' || lower === 'cmd' || lower === 'super') return '⌘';
+        if (lower === 'option' || lower === 'alt') return '⌥';
+        if (lower === 'control' || lower === 'ctrl') return '⌃';
+        if (lower === 'shift') return '⇧';
+        if (lower === 'space') return 'Space';
+        if (lower === 'return' || lower === 'enter') return '↩';
+        if (lower === 'up') return '↑';
+        if (lower === 'down') return '↓';
+        if (lower === 'left') return '←';
+        if (lower === 'right') return '→';
+        return part.toUpperCase();
+      })
+      .join('');
+  }
+  return accelerator.split('+').map((p) => p.trim()).join(' + ');
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -70,8 +104,10 @@ export const DEFAULT_SETTINGS: Settings = {
   minSelectionChars: 1,
   maxSelectionChars: 5000,
   launchAtLogin: false,
-  hotkeyShowLast: 'Alt+Ctrl+L',
-  hotkeyTranslateSelection: 'Alt+Ctrl+T',
+  showDockIcon: false,
+  hotkeyShowLast: isMacOS() ? 'Option+Command+L' : 'Alt+Ctrl+L',
+  hotkeyTranslateSelection: isMacOS() ? 'Option+Command+T' : 'Alt+Ctrl+T',
+  hotkeyTranslateClipboard: isMacOS() ? 'Shift+Command+K' : 'Shift+Ctrl+K',
 };
 
 export async function loadSettings(): Promise<Settings> {

@@ -23,6 +23,52 @@ pub mod secret {
 }
 
 pub mod clipboard {
+    #[cfg(target_os = "macos")]
+    pub fn read_text() -> Option<String> {
+        unsafe {
+            use objc2::msg_send;
+            use objc2::runtime::{AnyClass, AnyObject};
+            use std::ffi::CStr;
+
+            let cls = AnyClass::get(c"NSPasteboard")?;
+            let pasteboard: *mut AnyObject = msg_send![cls, generalPasteboard];
+            if pasteboard.is_null() {
+                return None;
+            }
+
+            let ns_string_cls = AnyClass::get(c"NSString")?;
+            let type_str: *mut AnyObject = msg_send![
+                ns_string_cls,
+                stringWithUTF8String: c"public.utf8-plain-text".as_ptr()
+            ];
+
+            let mut content: *mut AnyObject = msg_send![pasteboard, stringForType: type_str];
+            if content.is_null() {
+                let legacy_type: *mut AnyObject = msg_send![
+                    ns_string_cls,
+                    stringWithUTF8String: c"NSStringPboardType".as_ptr()
+                ];
+                content = msg_send![pasteboard, stringForType: legacy_type];
+            }
+            if content.is_null() {
+                return None;
+            }
+
+            let utf8: *const std::ffi::c_char = msg_send![content, UTF8String];
+            if utf8.is_null() {
+                return None;
+            }
+            let s = CStr::from_ptr(utf8).to_string_lossy().into_owned();
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
     pub fn read_text() -> Option<String> {
         None
     }

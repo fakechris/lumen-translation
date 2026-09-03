@@ -9,6 +9,7 @@ import {
   effectiveRegion,
   endpointFor,
   findProviderOrCustom,
+  formatShortcutDisplay,
   modelFor,
   newCustomProvider,
   normalizeChatEndpoint,
@@ -162,6 +163,37 @@ describe('region resolution', () => {
 describe('live subtitle capture scope', () => {
   it('defaults to all system audio so background playback is captured', () => {
     expect(DEFAULT_SETTINGS.liveSubtitleCaptureMode).toBe('allSystemAudio');
+  });
+});
+
+describe('formatShortcutDisplay', () => {
+  it('formats mac symbols with glyphs', () => {
+    expect(formatShortcutDisplay('Option+Command+L', true)).toBe('⌥⌘L');
+    expect(formatShortcutDisplay('Shift+Command+K', true)).toBe('⇧⌘K');
+    expect(formatShortcutDisplay('Option+Command+T', true)).toBe('⌥⌘T');
+    expect(formatShortcutDisplay('Control+Option+L', true)).toBe('⌃⌥L');
+  });
+
+  it('formats non-mac shortcuts with plus separators', () => {
+    expect(formatShortcutDisplay('Alt+Ctrl+L', false)).toBe('Alt + Ctrl + L');
+    expect(formatShortcutDisplay('Shift+Ctrl+K', false)).toBe('Shift + Ctrl + K');
+  });
+
+  it('handles empty input gracefully', () => {
+    expect(formatShortcutDisplay('')).toBe('');
+    expect(formatShortcutDisplay('  ')).toBe('');
+  });
+});
+
+describe('hotkeyTranslateClipboard', () => {
+  it('has a non-empty default hotkey', () => {
+    expect(DEFAULT_SETTINGS.hotkeyTranslateClipboard).toBeTruthy();
+  });
+});
+
+describe('showDockIcon', () => {
+  it('defaults to false (hidden by default)', () => {
+    expect(DEFAULT_SETTINGS.showDockIcon).toBe(false);
   });
 });
 
