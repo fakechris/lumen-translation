@@ -65,9 +65,11 @@ pub struct Settings {
     pub min_selection_chars: usize,
     pub max_selection_chars: usize,
     pub launch_at_login: bool,
+    pub show_dock_icon: bool,
     pub live_subtitle_capture_mode: LiveSubtitleCaptureMode,
     pub hotkey_show_last: String,
     pub hotkey_translate_selection: String,
+    pub hotkey_translate_clipboard: String,
 }
 
 impl Default for Settings {
@@ -85,9 +87,23 @@ impl Default for Settings {
             min_selection_chars: 1,
             max_selection_chars: 5000,
             launch_at_login: false,
+            show_dock_icon: false,
             live_subtitle_capture_mode: LiveSubtitleCaptureMode::AllSystemAudio,
-            hotkey_show_last: "Alt+Ctrl+L".into(),
-            hotkey_translate_selection: "Alt+Ctrl+T".into(),
+            hotkey_show_last: if cfg!(target_os = "macos") {
+                "Option+Command+L".into()
+            } else {
+                "Alt+Ctrl+L".into()
+            },
+            hotkey_translate_selection: if cfg!(target_os = "macos") {
+                "Option+Command+T".into()
+            } else {
+                "Alt+Ctrl+T".into()
+            },
+            hotkey_translate_clipboard: if cfg!(target_os = "macos") {
+                "Shift+Command+K".into()
+            } else {
+                "Shift+Ctrl+K".into()
+            },
         }
     }
 }
@@ -421,6 +437,15 @@ mod tests {
             settings.live_subtitle_capture_mode,
             LiveSubtitleCaptureMode::AllSystemAudio
         );
+        if cfg!(target_os = "macos") {
+            assert_eq!(settings.hotkey_show_last, "Option+Command+L");
+            assert_eq!(settings.hotkey_translate_selection, "Option+Command+T");
+            assert_eq!(settings.hotkey_translate_clipboard, "Shift+Command+K");
+        } else {
+            assert_eq!(settings.hotkey_show_last, "Alt+Ctrl+L");
+            assert_eq!(settings.hotkey_translate_selection, "Alt+Ctrl+T");
+            assert_eq!(settings.hotkey_translate_clipboard, "Shift+Ctrl+K");
+        }
     }
 
     #[test]
@@ -474,5 +499,27 @@ mod tests {
         assert_eq!(load(&path), Settings::default());
         assert!(path.with_extension("json.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn shortcuts_parse_valid_accelerators() {
+        use tauri_plugin_global_shortcut::Shortcut;
+        let defaults = Settings::default();
+        assert!(defaults.hotkey_show_last.parse::<Shortcut>().is_ok());
+        assert!(defaults.hotkey_translate_selection.parse::<Shortcut>().is_ok());
+        assert!(defaults.hotkey_translate_clipboard.parse::<Shortcut>().is_ok());
+
+        assert!("Option+Command+L".parse::<Shortcut>().is_ok());
+        assert!("Alt+Command+L".parse::<Shortcut>().is_ok());
+        assert!("Option+Command+T".parse::<Shortcut>().is_ok());
+        assert!("Shift+Command+K".parse::<Shortcut>().is_ok());
+        assert!("Alt+Ctrl+L".parse::<Shortcut>().is_ok());
+        assert!("Ctrl+Alt+L".parse::<Shortcut>().is_ok());
+        assert!("Control+Option+L".parse::<Shortcut>().is_ok());
+        assert!("Shift+Ctrl+K".parse::<Shortcut>().is_ok());
+        assert!("Option+Command+F1".parse::<Shortcut>().is_ok());
+        assert!("Option+Command+Space".parse::<Shortcut>().is_ok());
+        assert!("Option+Command+1".parse::<Shortcut>().is_ok());
+        assert!("Option+Command+Enter".parse::<Shortcut>().is_ok());
     }
 }

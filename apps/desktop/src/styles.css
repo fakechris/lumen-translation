@@ -426,6 +426,87 @@ button:focus-visible {
   color: var(--danger);
 }
 
+.shortcut-recorder-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.shortcut-recorder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.shortcut-recorder:hover {
+  background: var(--surface-sunken);
+  border-color: var(--ink-muted);
+}
+
+.shortcut-recorder.recording {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.25);
+  background: #fff;
+}
+
+.shortcut-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.shortcut-placeholder {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.shortcut-recording-text {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.shortcut-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.shortcut-clear-btn:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
 /* ------------------------------------------------------------------ */
 /* Live subtitle overlay — continuous bilingual flow                   */
 /* ------------------------------------------------------------------ */

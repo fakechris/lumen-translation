@@ -168,17 +168,25 @@ where
 
     if previous.hotkey_show_last != settings.hotkey_show_last
         || previous.hotkey_translate_selection != settings.hotkey_translate_selection
+        || previous.hotkey_translate_clipboard != settings.hotkey_translate_clipboard
     {
         register_shortcuts(app, &previous, &settings);
     }
     if previous.launch_at_login != settings.launch_at_login {
         apply_autostart(app, settings.launch_at_login);
     }
-    // Only the engine list and the active provider show up in the tray.
+    #[cfg(target_os = "macos")]
+    if previous.show_dock_icon != settings.show_dock_icon {
+        apply_dock_icon(app, settings.show_dock_icon);
+    }
+    // Only the engine list, active provider, autostart, and dock toggle show up in the tray.
     if previous.provider_id != settings.provider_id
         || previous.custom_providers != settings.custom_providers
         || previous.hotkey_show_last != settings.hotkey_show_last
         || previous.hotkey_translate_selection != settings.hotkey_translate_selection
+        || previous.hotkey_translate_clipboard != settings.hotkey_translate_clipboard
+        || previous.launch_at_login != settings.launch_at_login
+        || previous.show_dock_icon != settings.show_dock_icon
     {
         tray::refresh(app, &TrayIconId::new(TRAY_ID));
     }
@@ -252,6 +260,23 @@ async fn translate_selection(app: AppHandle) -> Result<(), String> {
         Some(text) if !text.trim().is_empty() => show_translation(&app, text.trim()),
         _ => {
             log::info!("nothing selected to translate");
+            Ok(())
+        }
+    }
+}
+
+/// Read text directly from the clipboard and translate it in the floating window.
+#[tauri::command]
+async fn translate_clipboard(app: AppHandle) -> Result<(), String> {
+    hide_bar(&app);
+    let text = tauri::async_runtime::spawn_blocking(platform::clipboard::read_text)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    match text {
+        Some(text) if !text.trim().is_empty() => show_translation(&app, text.trim()),
+        _ => {
+            log::info!("no text found in clipboard to translate");
             Ok(())
         }
     }
@@ -372,12 +397,17 @@ fn register_shortcuts(app: &AppHandle, previous: &Settings, next: &Settings) {
     for accelerator in [
         &previous.hotkey_show_last,
         &previous.hotkey_translate_selection,
+        &previous.hotkey_translate_clipboard,
     ] {
         if let Ok(shortcut) = accelerator.parse::<Shortcut>() {
             let _ = manager.unregister(shortcut);
         }
     }
-    for accelerator in [&next.hotkey_show_last, &next.hotkey_translate_selection] {
+    for accelerator in [
+        &next.hotkey_show_last,
+        &next.hotkey_translate_selection,
+        &next.hotkey_translate_clipboard,
+    ] {
         match accelerator.parse::<Shortcut>() {
             Ok(shortcut) => {
                 if let Err(err) = manager.register(shortcut) {
@@ -401,6 +431,18 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
     };
     if let Err(err) = result {
         log::error!("could not update the launch-at-login setting: {err}");
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_dock_icon(app: &AppHandle, show: bool) {
+    let policy = if show {
+        tauri::ActivationPolicy::Regular
+    } else {
+        tauri::ActivationPolicy::Accessory
+    };
+    if let Err(err) = app.set_activation_policy(policy) {
+        log::warn!("could not set activation policy: {err}");
     }
 }
 
@@ -941,6 +983,13 @@ pub fn run() {
                                 log::error!("translate-selection shortcut failed: {err}");
                             }
                         });
+                    } else if matches(&settings.hotkey_translate_clipboard) {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(err) = translate_clipboard(app).await {
+                                log::error!("translate-clipboard shortcut failed: {err}");
+                            }
+                        });
                     } else if matches(&settings.hotkey_show_last) {
                         let _ = show_last(app.clone());
                     }
@@ -962,6 +1011,7 @@ pub fn run() {
             set_engine_list,
             place_translate_window,
             translate_selection,
+            translate_clipboard,
             show_last,
             open_preferences,
             take_pending_translation,
@@ -1012,6 +1062,8 @@ pub fn run() {
 
             register_shortcuts(&handle, &Settings::default(), &loaded);
             apply_autostart(&handle, loaded.launch_at_login);
+            #[cfg(target_os = "macos")]
+            apply_dock_icon(&handle, loaded.show_dock_icon);
 
             // Start the selection watcher. Its config closure reads live
             // settings, so Preferences changes apply without a restart.
@@ -1202,11 +1254,40 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                         }
                     });
                 }
+                tray::ID_TRANSLATE_CLIPBOARD => {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(err) = translate_clipboard(app).await {
+                            log::error!("tray translate clipboard failed: {err}");
+                        }
+                    });
+                }
                 tray::ID_SHOW_LAST => {
                     let _ = show_last(app.clone());
                 }
                 tray::ID_PREFERENCES => {
                     let _ = open_preferences(app.clone());
+                }
+                tray::ID_LAUNCH_AT_LOGIN => {
+                    let state = app.state::<AppState>();
+                    if let Err(err) = apply_settings_with(app, &state, None, |current| {
+                        let mut settings = current.clone();
+                        settings.launch_at_login = !settings.launch_at_login;
+                        settings
+                    }) {
+                        log::error!("could not toggle launch at login: {err}");
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                tray::ID_SHOW_DOCK_ICON => {
+                    let state = app.state::<AppState>();
+                    if let Err(err) = apply_settings_with(app, &state, None, |current| {
+                        let mut settings = current.clone();
+                        settings.show_dock_icon = !settings.show_dock_icon;
+                        settings
+                    }) {
+                        log::error!("could not toggle dock icon: {err}");
+                    }
                 }
                 #[cfg(target_os = "macos")]
                 tray::ID_LIVE_CAPTION => {

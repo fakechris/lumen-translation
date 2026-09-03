@@ -20,7 +20,10 @@ import { autoDetectRegion, SOURCE_LANGS, TARGET_LANGS } from './lang';
 import {
   allProviders,
   apiKeyFor,
+  DEFAULT_SETTINGS,
   endpointFor,
+  formatShortcutDisplay,
+  isMacOS,
   loadSettings,
   modelFor,
   newCustomProvider,
@@ -500,29 +503,302 @@ function SelectionTab({ s, update }: TabProps) {
       <div className="section-title">Shortcuts</div>
       <div className="field">
         <label htmlFor="hk-translate">Translate selection</label>
-        <input
+        <ShortcutRecorder
           id="hk-translate"
-          type="text"
-          spellCheck={false}
           value={s.hotkeyTranslateSelection}
-          onChange={(e) => update({ hotkeyTranslateSelection: e.target.value })}
+          defaultValue={DEFAULT_SETTINGS.hotkeyTranslateSelection}
+          onChange={(hotkeyTranslateSelection) => update({ hotkeyTranslateSelection })}
+        />
+      </div>
+      <div className="field">
+        <label htmlFor="hk-clipboard">Translate clipboard</label>
+        <ShortcutRecorder
+          id="hk-clipboard"
+          value={s.hotkeyTranslateClipboard}
+          defaultValue={DEFAULT_SETTINGS.hotkeyTranslateClipboard}
+          onChange={(hotkeyTranslateClipboard) => update({ hotkeyTranslateClipboard })}
         />
       </div>
       <div className="field">
         <label htmlFor="hk-last">Show last translation</label>
-        <input
+        <ShortcutRecorder
           id="hk-last"
-          type="text"
-          spellCheck={false}
           value={s.hotkeyShowLast}
-          onChange={(e) => update({ hotkeyShowLast: e.target.value })}
+          defaultValue={DEFAULT_SETTINGS.hotkeyShowLast}
+          onChange={(hotkeyShowLast) => update({ hotkeyShowLast })}
         />
       </div>
       <p className="hint">
-        Tauri accelerator syntax, e.g. <code>Alt+Ctrl+T</code> or <code>Shift+Super+Y</code>.
-        Invalid or already-claimed combinations are reported in the tray tooltip.
+        Click a shortcut to record keys directly (e.g. ⌥⌘L / ⇧⌘K). Press Escape to cancel, Backspace to clear.
       </p>
     </>
+  );
+}
+
+function isModifierKey(code: string, key: string): boolean {
+  return (
+    ['Meta', 'Alt', 'Control', 'Shift', 'AltGraph', 'OS'].includes(key) ||
+    [
+      'MetaLeft',
+      'MetaRight',
+      'AltLeft',
+      'AltRight',
+      'ControlLeft',
+      'ControlRight',
+      'ShiftLeft',
+      'ShiftRight',
+      'OSLeft',
+      'OSRight',
+    ].includes(code)
+  );
+}
+
+function getModifiers(e: { ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }): string[] {
+  const isMac = isMacOS();
+  const modifiers: string[] = [];
+  if (isMac) {
+    if (e.ctrlKey) modifiers.push('Control');
+    if (e.altKey) modifiers.push('Option');
+    if (e.shiftKey) modifiers.push('Shift');
+    if (e.metaKey) modifiers.push('Command');
+  } else {
+    if (e.ctrlKey) modifiers.push('Ctrl');
+    if (e.altKey) modifiers.push('Alt');
+    if (e.shiftKey) modifiers.push('Shift');
+    if (e.metaKey) modifiers.push('Super');
+  }
+  return modifiers;
+}
+
+function resolveKeyName(code: string, key: string): string {
+  if (code.startsWith('Key')) {
+    return code.slice(3).toUpperCase();
+  }
+  if (code.startsWith('Digit')) {
+    return code.slice(5);
+  }
+  if (code.startsWith('Numpad') && /^Numpad\d$/.test(code)) {
+    return code.slice(6);
+  }
+  if (/^F\d+$/.test(code)) {
+    return code;
+  }
+
+  switch (code) {
+    case 'Space':
+      return 'Space';
+    case 'Enter':
+    case 'NumpadEnter':
+      return 'Enter';
+    case 'Tab':
+      return 'Tab';
+    case 'Backquote':
+      return '`';
+    case 'Minus':
+    case 'NumpadSubtract':
+      return '-';
+    case 'Equal':
+    case 'NumpadEqual':
+      return '=';
+    case 'BracketLeft':
+      return '[';
+    case 'BracketRight':
+      return ']';
+    case 'Backslash':
+      return '\\';
+    case 'Semicolon':
+      return ';';
+    case 'Quote':
+      return "'";
+    case 'Comma':
+      return ',';
+    case 'Period':
+    case 'NumpadDecimal':
+      return '.';
+    case 'Slash':
+    case 'NumpadDivide':
+      return '/';
+    case 'ArrowUp':
+      return 'Up';
+    case 'ArrowDown':
+      return 'Down';
+    case 'ArrowLeft':
+      return 'Left';
+    case 'ArrowRight':
+      return 'Right';
+    case 'Home':
+      return 'Home';
+    case 'End':
+      return 'End';
+    case 'PageUp':
+      return 'PageUp';
+    case 'PageDown':
+      return 'PageDown';
+    case 'Insert':
+      return 'Insert';
+  }
+
+  if (key && key.length === 1 && /^[\x20-\x7E]$/.test(key)) {
+    return key.toUpperCase();
+  }
+
+  return '';
+}
+
+function ShortcutRecorder({
+  id,
+  value,
+  defaultValue,
+  onChange,
+}: {
+  id?: string;
+  value: string;
+  defaultValue?: string;
+  onChange: (value: string) => void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [heldModifiers, setHeldModifiers] = useState<string[]>([]);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!recording) return;
+
+    buttonRef.current?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'Escape' || e.code === 'Escape') {
+        setRecording(false);
+        setHeldModifiers([]);
+        return;
+      }
+
+      if (
+        (e.key === 'Backspace' || e.key === 'Delete' || e.code === 'Backspace' || e.code === 'Delete') &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.shiftKey
+      ) {
+        onChange('');
+        setRecording(false);
+        setHeldModifiers([]);
+        return;
+      }
+
+      if (e.key === 'Tab' && !e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey) {
+        setRecording(false);
+        setHeldModifiers([]);
+        return;
+      }
+
+      const modifiers = getModifiers(e);
+
+      if (isModifierKey(e.code, e.key)) {
+        setHeldModifiers(modifiers);
+        return;
+      }
+
+      const keyName = resolveKeyName(e.code, e.key);
+      if (!keyName) return;
+
+      const isFunctionKey = /^F\d+$/.test(keyName);
+      if (!isFunctionKey && modifiers.length === 0) {
+        return;
+      }
+
+      const accelerator = [...modifiers, keyName].join('+');
+      onChange(accelerator);
+      setRecording(false);
+      setHeldModifiers([]);
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setHeldModifiers(getModifiers(e));
+    };
+
+    const handlePointerDown = (e: MouseEvent) => {
+      if (buttonRef.current && !buttonRef.current.contains(e.target as Node)) {
+        setRecording(false);
+        setHeldModifiers([]);
+      }
+    };
+
+    const handleBlur = () => {
+      setRecording(false);
+      setHeldModifiers([]);
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [recording, onChange]);
+
+  const displayText = useMemo(() => {
+    if (recording) {
+      if (heldModifiers.length > 0) {
+        return formatShortcutDisplay(heldModifiers.join('+')) + '...';
+      }
+      return 'Press shortcut keys...';
+    }
+    if (!value) return 'None (Click to record)';
+    return formatShortcutDisplay(value);
+  }, [recording, heldModifiers, value]);
+
+  return (
+    <div className="shortcut-recorder-wrap">
+      <button
+        id={id}
+        ref={buttonRef}
+        type="button"
+        className={`shortcut-recorder ${recording ? 'recording' : ''}`}
+        onClick={(e) => {
+          e.preventDefault();
+          setRecording((prev) => !prev);
+          setHeldModifiers([]);
+        }}
+        title={recording ? 'Press your shortcut combination or Esc to cancel' : 'Click to record a new shortcut'}
+      >
+        <span className={recording ? 'shortcut-recording-text' : (value ? 'shortcut-display' : 'shortcut-placeholder')}>
+          {displayText}
+        </span>
+        {value && !recording && (
+          <span
+            className="shortcut-clear-btn"
+            title="Clear shortcut"
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange('');
+            }}
+          >
+            ×
+          </span>
+        )}
+      </button>
+      {defaultValue && value !== defaultValue && (
+        <button
+          type="button"
+          className="text-button"
+          style={{ padding: '3px 7px', fontSize: '11px', flexShrink: 0 }}
+          title={`Reset to default (${formatShortcutDisplay(defaultValue)})`}
+          onClick={() => onChange(defaultValue)}
+        >
+          Reset
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -624,6 +900,19 @@ function GeneralTab({ s, update }: TabProps) {
           />
         </div>
       </div>
+      {isMacOS() && (
+        <div className="field check">
+          <label htmlFor="dock-icon">Show icon in Dock</label>
+          <div>
+            <input
+              id="dock-icon"
+              type="checkbox"
+              checked={s.showDockIcon}
+              onChange={(e) => update({ showDockIcon: e.target.checked })}
+            />
+          </div>
+        </div>
+      )}
     </>
   );
 }

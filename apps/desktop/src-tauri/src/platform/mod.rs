@@ -23,6 +23,5 @@ mod imp;
 #[path = "stub.rs"]
 mod imp;
 
-// `clipboard` is deliberately not re-exported: it is how `selection` implements
-// its Ctrl+C fallback, not something the app above this layer should reach for.
-pub use imp::{secret, selection, window_ext};
+// `clipboard` is used for clipboard translation across platforms.
+pub use imp::{clipboard, secret, selection, window_ext};

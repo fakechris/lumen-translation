@@ -17,9 +17,13 @@ use crate::AppState;
 
 /// Menu item ids. Engine entries use the `engine:<providerId>` prefix.
 pub const ID_TRANSLATE: &str = "translate-selection";
+pub const ID_TRANSLATE_CLIPBOARD: &str = "translate-clipboard";
 pub const ID_SHOW_LAST: &str = "show-last";
 pub const ID_PREFERENCES: &str = "preferences";
 pub const ID_QUIT: &str = "quit";
+pub const ID_LAUNCH_AT_LOGIN: &str = "launch-at-login";
+#[cfg(target_os = "macos")]
+pub const ID_SHOW_DOCK_ICON: &str = "show-dock-icon";
 /// macOS-only: toggle the live-subtitle spike session.
 #[cfg(target_os = "macos")]
 pub const ID_LIVE_CAPTION: &str = "live-caption";
@@ -41,6 +45,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         let s = state.settings.read();
         (
             s.hotkey_translate_selection.clone(),
+            s.hotkey_translate_clipboard.clone(),
             s.hotkey_show_last.clone(),
         )
     };
@@ -52,10 +57,17 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         true,
         None::<&str>,
     )?;
+    let translate_clipboard = MenuItem::with_id(
+        app,
+        ID_TRANSLATE_CLIPBOARD,
+        format!("Translate Clipboard\t{}", hotkeys.1),
+        true,
+        None::<&str>,
+    )?;
     let show_last = MenuItem::with_id(
         app,
         ID_SHOW_LAST,
-        format!("Show Last Translation\t{}", hotkeys.1),
+        format!("Show Last Translation\t{}", hotkeys.2),
         true,
         None::<&str>,
     )?;
@@ -82,6 +94,31 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let preferences = MenuItem::with_id(app, ID_PREFERENCES, "Preferences…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit Lumen Translation", true, None::<&str>)?;
 
+    let launch_at_login = {
+        let enabled = state.settings.read().launch_at_login;
+        CheckMenuItem::with_id(
+            app,
+            ID_LAUNCH_AT_LOGIN,
+            "Launch at Login",
+            true,
+            enabled,
+            None::<&str>,
+        )?
+    };
+
+    #[cfg(target_os = "macos")]
+    let show_dock_icon = {
+        let show = state.settings.read().show_dock_icon;
+        CheckMenuItem::with_id(
+            app,
+            ID_SHOW_DOCK_ICON,
+            "Show in Dock",
+            true,
+            show,
+            None::<&str>,
+        )?
+    };
+
     // Live subtitles exist only where the process-tap capability does; hiding
     // the entry elsewhere beats a menu item that always errors.
     #[cfg(target_os = "macos")]
@@ -97,10 +134,10 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )?
     };
 
-    //  is only consumed by the macOS live-caption branch below.
-    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    // `mut` is consumed by the conditional macOS/settings branch below.
     let mut menu = MenuBuilder::new(app)
         .item(&translate)
+        .item(&translate_clipboard)
         .item(&show_last)
         .separator()
         .item(&engine_menu)
@@ -109,7 +146,12 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     {
         menu = menu.item(&live_caption).separator();
     }
-    menu.item(&preferences).separator().item(&quit).build()
+    #[cfg(target_os = "macos")]
+    {
+        menu = menu.item(&show_dock_icon);
+    }
+    menu = menu.item(&launch_at_login);
+    menu.separator().item(&preferences).separator().item(&quit).build()
 }
 
 /// Re-render the tray menu, e.g. after the engine list or selection changed.
