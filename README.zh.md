@@ -8,7 +8,7 @@
 
 [English](README.md) | 中文
 
-Lumen Translation 让你用任何语言阅读、写作、看视频、开会。它以浏览器扩展、油猴脚本、macOS PopClip 扩展、移动端壳和可自托管的同步后端五种形态运行，全部构建在一组可独立引入的 npm 核心包之上。
+Lumen Translation 让你用任何语言阅读、写作、看视频、开会。它以浏览器扩展、油猴脚本、macOS PopClip 扩展 + 菜单栏伴生应用、Windows 桌面应用、移动端壳和可自托管的同步后端等形态运行，全部构建在一组可独立引入的 npm 核心包之上。
 
 - **许可证**：Apache-2.0（商业友好，无 copyleft）。
 - **隐私**：所有设置保存在本地；AI 调用使用你自己的 key；无代理，无遥测，无广告。
@@ -139,6 +139,7 @@ window.dispatchEvent(new CustomEvent('lumen', { detail: { action: 'toggle_transl
 | **传统机翻** | DeepL (Free/Pro) |
 | **LLM · 国内** | DeepSeek 深度求索、GLM 智谱 BigModel、Kimi 月之暗面、MiniMax 海螺、豆包 字节火山 Ark、通义千问 阿里 DashScope、腾讯混元 Hunyuan、百度文心 ERNIE、讯飞星火 Spark、百川 Baichuan、零一万物 Yi、硅基流动 SiliconFlow |
 | **LLM · 海外** | OpenRouter（聚合器，100+ 模型） |
+| **LLM · 官方 OpenAI** | OpenAI（官方端点；在各应用里通过专用的「OpenAI 兼容自定义端点」入口配置，该入口同时兼容任何 OpenAI 风格 API） |
 | **本地 / 自定义** | Ollama（本地）、OpenAI 兼容自定义端点 |
 
 LLM 特性：
@@ -305,7 +306,7 @@ npx wrangler deploy
 
 pnpm monorepo。核心包与引擎无关、与 DOM 无关，所有应用复用。
 
-```
+```text
 packages/
   core/        @lumen/core        Engine/Segment/Rule/Settings，批量+并发管线，去重
   engines/     @lumen/engines     Google/Microsoft/DeepL/OpenAI/Ollama + 目录驱动的 LLM 服务商，流式
@@ -400,7 +401,7 @@ git tag v0.2.0 && git push origin v0.2.0
 
 ## 里程碑
 
-状态截至 `v0.1.0`。
+状态截至 `v0.1.2`。v0.1.0 之后又合入了 13 个 feature/fix 提交——最重要的是 macOS PopClip 菜单栏伴生应用（LumenWindow）、品牌设计系统统一与引擎健壮性修复，逐项见 [Releases](https://github.com/fakechris/lumen-translation/releases)。下方 v0.1.0 里程碑保留为历史记录。
 
 ### v0.1.0 —— Phase 1 MVP + Phase 2/3 框架 ✅ 已发布
 

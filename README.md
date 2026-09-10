@@ -6,7 +6,7 @@
 [![Build](https://github.com/fakechris/lumen-translation/actions/workflows/ci.yml/badge.svg)](https://github.com/fakechris/lumen-translation/actions/workflows/ci.yml)
 [![Release](https://github.com/fakechris/lumen-translation/actions/workflows/release.yml/badge.svg)](https://github.com/fakechris/lumen-translation/releases)
 
-Lumen Translation lets you read, write, watch, and attend meetings in any language. It runs as a browser extension, a userscript, a macOS PopClip extension, a mobile app shell, and a self-hostable sync backend, all built on a shared core of independently importable npm packages.
+Lumen Translation lets you read, write, watch, and attend meetings in any language. It runs as a browser extension, a userscript, a macOS PopClip extension with a menu-bar companion app, a Windows desktop app, a mobile app shell, and a self-hostable sync backend, all built on a shared core of independently importable npm packages.
 
 - **License**: Apache-2.0 (commercial-friendly, no copyleft).
 - **Privacy**: all settings stay local; AI calls use your own keys; no proxy, no telemetry, no ads.
@@ -139,6 +139,7 @@ Engines are grouped in the options UI. All LLM engines are OpenAI-compatible and
 | **Classic MT**     | DeepL (Free/Pro)                                                                                                                                                                                                  |
 | **LLM · China**    | DeepSeek 深度求索, GLM 智谱 BigModel, Kimi 月之暗面, MiniMax 海螺, 豆包 字节火山 Ark, 通义千问 阿里 DashScope, 腾讯混元 Hunyuan, 百度文心 ERNIE, 讯飞星火 Spark, 百川 Baichuan, 零一万物 Yi, 硅基流动 SiliconFlow |
 | **LLM · Overseas** | OpenRouter (aggregator, 100+ models)                                                                                                                                                                              |
+| **LLM · Official OpenAI** | OpenAI (official endpoint; configured through the dedicated OpenAI-compatible custom entry in each app, which also accepts any OpenAI-style API)                                                           |
 | **Local / Custom** | Ollama (local), OpenAI-compatible custom endpoint                                                                                                                                                                 |
 
 LLM features:
@@ -438,7 +439,7 @@ git tag v0.2.0 && git push origin v0.2.0
 
 ## Milestones
 
-Status as of `v0.1.0`.
+Status as of `v0.1.2`. Thirteen feature/fix commits have landed since `v0.1.0` — most notably the macOS PopClip menu-bar companion app (LumenWindow), the unified Lumen Design System, and engine robustness fixes; see [Releases](https://github.com/fakechris/lumen-translation/releases) for the itemized changes. The v0.1.0 milestone below is kept as history.
 
 ### v0.1.0 — Phase 1 MVP + Phase 2/3 frameworks ✅ Shipped
 
