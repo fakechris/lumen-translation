@@ -10,7 +10,9 @@ Lumen Translation lets you read, write, watch, and attend meetings in any langua
 
 - **License**: Apache-2.0 (commercial-friendly, no copyleft).
 - **Privacy**: all settings stay local; AI calls use your own keys; no proxy, no telemetry, no ads.
-- **Current release**: [v0.1.0](https://github.com/fakechris/lumen-translation/releases/tag/v0.1.0) — Phase 1 MVP + Phase 2/3 frameworks.
+- **Current release**: [v0.1.2](https://github.com/fakechris/lumen-translation/releases/latest) — Phase 1 MVP + Phase 2/3 frameworks.
+
+[English](README.md) | [中文](README.zh.md)
 
 ---
 
