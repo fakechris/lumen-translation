@@ -5,7 +5,8 @@
 //   - General: region, source/target language
 //   - About: version, links
 //
-// Opened from the status bar item (LSUIElement apps have no app menu).
+// Opened from the settings button in the translate window (LSUIElement apps
+// have no app menu).
 
 import AppKit
 import SwiftUI
