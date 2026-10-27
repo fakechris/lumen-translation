@@ -60,7 +60,7 @@ cat > "${CONTENTS}/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key>
   <string>Lumen Translation</string>
   <key>CFBundleIdentifier</key>
-  <string>app.lumen.translation</string>
+  <string>app.lumen.translation.popclip</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>CFBundleShortVersionString</key>

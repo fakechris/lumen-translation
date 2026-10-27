@@ -61,7 +61,28 @@ final class Preferences {
   }
 
   private init() {
+    migrateDefaultsFromLegacyBundleId()
     migrateLegacyProviderData()
+  }
+
+  /// The companion app used to share the Tauri desktop app's bundle id
+  /// (`app.lumen.translation`), which made PopClip's auto-wake probe treat the
+  /// desktop app as already running and never launch it (INV-1374). The id is
+  /// now `app.lumen.translation.popclip`, and the standard defaults domain
+  /// changed with it — so on first launch under the new id, copy every
+  /// `lumen.*` key from the old domain that the new domain does not have yet.
+  /// Copying only absent keys keeps this idempotent; the old domain is left in
+  /// place because the Tauri port's legacy import still reads it.
+  private func migrateDefaultsFromLegacyBundleId() {
+    guard Bundle.main.bundleIdentifier == "app.lumen.translation.popclip",
+          let legacy = UserDefaults(suiteName: "app.lumen.translation") else {
+      return
+    }
+    for (key, value) in legacy.dictionaryRepresentation() where key.hasPrefix("lumen.") {
+      if defaults.object(forKey: key) == nil {
+        defaults.set(value, forKey: key)
+      }
+    }
   }
 
   /// Older builds stored app-local provider ids ("google", "microsoft",

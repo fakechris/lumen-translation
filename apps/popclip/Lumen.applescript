@@ -5,6 +5,11 @@
 -- Preferences window is the full management UI.
 
 -- Ensure the app is launched and running if it was not started yet.
+-- The bundle id probed here is the Tauri desktop app's. The Swift companion
+-- (LumenTranslation.app) deliberately carries a different id
+-- (app.lumen.translation.popclip) so this probe can never mistake the
+-- companion for the desktop app — sharing one id is exactly what used to
+-- suppress this wake-up (INV-1374).
 set isRunning to false
 try
 	tell application "System Events"
