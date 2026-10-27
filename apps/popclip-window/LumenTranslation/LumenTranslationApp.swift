@@ -11,10 +11,11 @@
 //
 // PopClip action:  tell application "LumenTranslation" to translate "text"
 //
-// LLM providers (configured via Preferences window, opened from the status
-// bar item) are driven by the vendored lumen-suite provider catalog (see
-// ProviderCatalog.swift): Google / Microsoft (free), OpenAI, OpenRouter
-// (incl. Claude), Kimi, GLM, MiniMax, DeepSeek. Region auto-detected.
+// LLM providers (configured via Preferences window, opened from the settings
+// button in the translate window) are driven by the vendored lumen-suite
+// provider catalog (see ProviderCatalog.swift): Google / Microsoft (free),
+// OpenAI, OpenRouter (incl. Claude), Kimi, GLM, MiniMax, DeepSeek. Region
+// auto-detected.
 
 import AppKit
 import Carbon.HIToolbox
@@ -348,6 +349,7 @@ final class TranslateContentView: NSView {
   private let statusLabel = NSTextField(labelWithString: "")
   private let copyButton = NSButton()
   private let speakButton = NSButton()
+  private let settingsButton = NSButton()
   private let closeButton = NSButton()
   private let divider = NSBox()
   // Bob-style quick language switcher: [source ▾] ⇄ [target ▾].
@@ -486,6 +488,19 @@ final class TranslateContentView: NSView {
     closeButton.translatesAutoresizingMaskIntoConstraints = false
     closeButton.isBordered = false
 
+    // Settings gear — the only entry to the Preferences window since the
+    // status bar item was removed (the Tauri tray owns the menu bar now).
+    settingsButton.image = NSImage(systemSymbolName: "gearshape",
+                                   accessibilityDescription: "Settings")
+    settingsButton.imagePosition = .imageOnly
+    settingsButton.font = .systemFont(ofSize: 13)
+    settingsButton.contentTintColor = TranslateContentView.warmSecondary
+    settingsButton.target = self
+    settingsButton.action = #selector(settingsAction)
+    settingsButton.toolTip = "Settings"
+    settingsButton.isBordered = false
+    settingsButton.translatesAutoresizingMaskIntoConstraints = false
+
     copyButton.title = "Copy"
     copyButton.bezelStyle = .inline
     copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy")
@@ -550,6 +565,7 @@ final class TranslateContentView: NSView {
     addSubview(speakButton)
     addSubview(statusLabel)
     addSubview(engineLabel)
+    addSubview(settingsButton)
     addSubview(closeButton)
 
     let srcC = sourceScrollView.heightAnchor.constraint(equalToConstant: 60)
@@ -571,7 +587,7 @@ final class TranslateContentView: NSView {
 
       targetLangPopup.leadingAnchor.constraint(equalTo: swapButton.trailingAnchor, constant: 4),
       targetLangPopup.centerYAnchor.constraint(equalTo: sourceLangPopup.centerYAnchor),
-      targetLangPopup.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
+      targetLangPopup.trailingAnchor.constraint(lessThanOrEqualTo: settingsButton.leadingAnchor, constant: -8),
 
       sourceScrollView.topAnchor.constraint(equalTo: topAnchor, constant: 40),
       sourceScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
@@ -599,6 +615,11 @@ final class TranslateContentView: NSView {
 
       engineLabel.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
       engineLabel.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 8),
+
+      settingsButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+      settingsButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
+      settingsButton.widthAnchor.constraint(equalToConstant: 22),
+      settingsButton.heightAnchor.constraint(equalToConstant: 22),
 
       closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
@@ -759,6 +780,10 @@ final class TranslateContentView: NSView {
     // Close the enclosing window immediately (no need to wait for the
     // auto-hide timer).
     self.window?.orderOut(nil)
+  }
+
+  @objc private func settingsAction() {
+    PreferencesWindowController.show()
   }
 
   // MARK: - Linked scrolling
