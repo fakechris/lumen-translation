@@ -354,6 +354,7 @@ final class TranslateContentView: NSView {
   private let statusLabel = NSTextField(labelWithString: "")
   private let copyButton = NSButton()
   private let speakButton = NSButton()
+  private let openLumenButton = NSButton()
   private let settingsButton = NSButton()
   private let closeButton = NSButton()
   private let divider = NSBox()
@@ -526,6 +527,18 @@ final class TranslateContentView: NSView {
     speakButton.translatesAutoresizingMaskIntoConstraints = false
     speakButton.isBordered = false
 
+    openLumenButton.title = "Open Lumen"
+    openLumenButton.bezelStyle = .inline
+    openLumenButton.image = NSImage(systemSymbolName: "menubar.dock.window",
+                                    accessibilityDescription: "Open Lumen")
+    openLumenButton.imagePosition = .imageLeft
+    openLumenButton.font = .systemFont(ofSize: 12)
+    openLumenButton.target = self
+    openLumenButton.action = #selector(openLumenAction)
+    openLumenButton.toolTip = "Launch the Lumen Translation desktop app (tray, ⌥⌘T/⌥⌘K, live subtitles)"
+    openLumenButton.translatesAutoresizingMaskIntoConstraints = false
+    openLumenButton.isBordered = false
+
     // Quick language switcher ([source ▾] ⇄ [target ▾], Bob-style). The
     // source popup lists auto-detect first; the target popup only concrete
     // languages. Picking either re-translates immediately.
@@ -568,6 +581,7 @@ final class TranslateContentView: NSView {
     addSubview(translationScrollView)
     addSubview(copyButton)
     addSubview(speakButton)
+    addSubview(openLumenButton)
     addSubview(statusLabel)
     addSubview(engineLabel)
     addSubview(settingsButton)
@@ -615,11 +629,14 @@ final class TranslateContentView: NSView {
       speakButton.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
       speakButton.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 14),
 
+      openLumenButton.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
+      openLumenButton.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 14),
+
       statusLabel.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
-      statusLabel.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 8),
+      statusLabel.leadingAnchor.constraint(equalTo: openLumenButton.trailingAnchor, constant: 8),
 
       engineLabel.centerYAnchor.constraint(equalTo: copyButton.centerYAnchor),
-      engineLabel.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 8),
+      engineLabel.leadingAnchor.constraint(equalTo: openLumenButton.trailingAnchor, constant: 8),
 
       settingsButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
       settingsButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
@@ -789,6 +806,18 @@ final class TranslateContentView: NSView {
 
   @objc private func settingsAction() {
     PreferencesWindowController.show()
+  }
+
+  @objc private func openLumenAction() {
+    // INV-1374: this bundle id belongs to the Tauri desktop app alone. When
+    // it is already running, its single-instance handler surfaces Preferences,
+    // so the button doubles as a shortcut to the desktop app's settings.
+    guard let appURL = NSWorkspace.shared.urlForApplication(
+      withBundleIdentifier: "app.lumen.translation") else {
+      return
+    }
+    NSWorkspace.shared.openApplication(at: appURL,
+                                       configuration: NSWorkspace.OpenConfiguration())
   }
 
   // MARK: - Linked scrolling
