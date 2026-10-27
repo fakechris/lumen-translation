@@ -10,7 +10,13 @@
  * Save/Cancel, and the tray's Engine submenu picks changes up immediately.
  */
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { getVersion } from '@tauri-apps/api/app';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -71,7 +77,10 @@ export function PreferencesWindow() {
     void saveSettings(next).catch(console.error);
   };
 
-  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+  const onTabKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
     let next = index;
     if (event.key === 'ArrowRight') next = (index + 1) % TABS.length;
     else if (event.key === 'ArrowLeft') next = (index - 1 + TABS.length) % TABS.length;
