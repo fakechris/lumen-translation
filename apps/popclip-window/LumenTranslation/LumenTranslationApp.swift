@@ -39,6 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ProcessInfo.processInfo.disableAutomaticTermination("lumen-popclip-window")
     ProcessInfo.processInfo.disableSuddenTermination()
 
+    // Force Preferences init at launch so the bundle-id defaults migration
+    // runs before PopClip's first configure/translate arrives — a bare launch
+    // touches no other Preferences path.
+    _ = Preferences.shared
+
     // Global hotkey ⌥⌘L: re-show the last translation from any app, keeping
     // its original source + translation context.
     reopenHotKey = GlobalHotKey(keyCode: UInt32(kVK_ANSI_L),
