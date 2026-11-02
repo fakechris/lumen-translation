@@ -48,6 +48,14 @@ interface Payload {
   engine: string;
   /** Set when the translation failed outright, so the pane can style it red. */
   failed?: boolean;
+  /**
+   * True while the translation is still arriving.
+   *
+   * The window is sized differently while streaming: the final length of the
+   * translation is unknown until the last chunk lands, so the window is sized
+   * for the source and corrected once the translation is complete.
+   */
+  streaming?: boolean;
 }
 
 const EMPTY: Payload = { source: '', translation: '', engine: '' };
@@ -67,6 +75,11 @@ export function TranslateWindow() {
   const runId = useRef(0);
   // Last height asked of Rust, so an echoed resize isn't re-sent.
   const lastHeight = useRef(0);
+  // The size callback must not be re-created for every streamed chunk, so it
+  // reads the latest payload — in particular whether the translation is still
+  // streaming — from a ref instead of closing over it.
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const settingsReady = useRef<Promise<Settings> | null>(null);
@@ -129,16 +142,21 @@ export function TranslateWindow() {
       const id = ++runId.current;
       setBusy(true);
       setCopied(false);
-      setPayload({ source: text, translation: '', engine: '' });
+      setPayload({ source: text, translation: '', engine: '', streaming: true });
       try {
         const res = await translate(text, activeSettings, {
           onPartial: (partial, engine) => {
             if (runId.current !== id) return;
-            setPayload({ source: text, translation: partial, engine });
+            setPayload({ source: text, translation: partial, engine, streaming: true });
           },
         });
         if (runId.current !== id) return;
-        setPayload({ source: text, translation: res.translation, engine: res.engine });
+        setPayload({
+          source: text,
+          translation: res.translation,
+          engine: res.engine,
+          streaming: false,
+        });
       } catch (err) {
         if (runId.current !== id) return;
         const message = err instanceof TranslationFailed ? err.message : String(err);
@@ -147,6 +165,7 @@ export function TranslateWindow() {
           translation: `Lumen error: ${message}`,
           engine: 'error',
           failed: true,
+          streaming: false,
         });
       } finally {
         if (runId.current === id) setBusy(false);
@@ -217,12 +236,18 @@ export function TranslateWindow() {
   // `vh` + `clientHeight` pairing made the target a function of the current
   // height, and the card walked to its fixed point one native resize at a
   // time — about twenty resizes per translation.
+  //
+  // While the translation streams in, its final length is unknown, so the
+  // height is taken from the source text alone and the card keeps that height
+  // until the translation lands. Sizing it against the streamed text instead
+  // would resize the window once per chunk.
   const applySize = useCallback(() => {
     if (!metrics) return;
     const height = translateWindowHeight({
       sourceContentHeight: sourceRef.current?.scrollHeight ?? 0,
       translationContentHeight: translationRef.current?.scrollHeight ?? 0,
       workAreaHeight: metrics.workAreaHeight,
+      streaming: payloadRef.current.streaming === true,
     });
     if (height === lastHeight.current) return;
     lastHeight.current = height;
@@ -231,9 +256,9 @@ export function TranslateWindow() {
 
   // Resizing the native window costs a full webview re-layout and repaint, so
   // the size is applied on the leading edge — the source text lands at once —
-  // and then coalesced. A streaming translation delivers a chunk every few tens
-  // of milliseconds, and resizing for each of them walks the window up in
-  // twenty steps while the text is still arriving.
+  // and then coalesced. A streaming translation delivers a chunk every few
+  // hundred milliseconds; the height no longer depends on those chunks, but
+  // measuring once per chunk would still cost a round trip to Rust each time.
   const sizeTimer = useRef<number | null>(null);
   const scheduleSize = useCallback(() => {
     if (sizeTimer.current === null) {
@@ -270,7 +295,7 @@ export function TranslateWindow() {
     if (sourceRef.current) ro.observe(sourceRef.current);
     if (translationRef.current) ro.observe(translationRef.current);
     return () => ro.disconnect();
-  }, [payload.source, payload.translation, metrics, ensureMetrics, scheduleSize]);
+  }, [payload.source, payload.translation, payload.streaming, metrics, ensureMetrics, scheduleSize]);
 
   // Scrolling the source drives the translation proportionally; scrolling the
   // translation does not move the source (one-way, as on macOS).

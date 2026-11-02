@@ -6,7 +6,9 @@ import {
   TRANSLATION_AREA_SHARE,
   paneCap,
   paneHeight,
+  sourcePaneHeight,
   translateWindowHeight,
+  translationPaneHeight,
 } from "../translate-window-sizing";
 
 /**
@@ -52,17 +54,45 @@ describe("paneHeight", () => {
   });
 });
 
+describe("sourcePaneHeight", () => {
+  it("keeps short content whole and caps long content", () => {
+    expect(sourcePaneHeight(120, WORK_AREA)).toBe(120);
+    expect(sourcePaneHeight(5000, WORK_AREA)).toBe(315);
+  });
+});
+
+describe("translationPaneHeight", () => {
+  it("takes the height of the text once the translation has landed", () => {
+    expect(translationPaneHeight(260, 300, WORK_AREA, false)).toBe(260);
+  });
+
+  it("ignores the streamed text while the translation is arriving", () => {
+    // The final length of a streaming translation is unknown, so the pane is
+    // sized for the source instead: the window keeps one height for the whole
+    // translation rather than growing one native resize per chunk.
+    expect(translationPaneHeight(0, 300, WORK_AREA, true)).toBe(300);
+    expect(translationPaneHeight(120, 300, WORK_AREA, true)).toBe(300);
+    expect(translationPaneHeight(9000, 300, WORK_AREA, true)).toBe(300);
+  });
+
+  it("caps the streaming height at the pane's share of the work area", () => {
+    expect(translationPaneHeight(0, 9000, WORK_AREA, true)).toBe(405);
+  });
+});
+
 describe("translateWindowHeight", () => {
   it("grows with the content", () => {
     const short = translateWindowHeight({
       sourceContentHeight: 60,
       translationContentHeight: 40,
       workAreaHeight: WORK_AREA,
+      streaming: false,
     });
     const long = translateWindowHeight({
       sourceContentHeight: 300,
       translationContentHeight: 260,
       workAreaHeight: WORK_AREA,
+      streaming: false,
     });
     // 60 + 40 does not even cover the chrome, so the minimum height wins.
     expect(short).toBe(MIN_HEIGHT);
@@ -76,6 +106,7 @@ describe("translateWindowHeight", () => {
         sourceContentHeight: 0,
         translationContentHeight: 0,
         workAreaHeight: WORK_AREA,
+        streaming: false,
       }),
     ).toBe(MIN_HEIGHT);
   });
@@ -87,6 +118,7 @@ describe("translateWindowHeight", () => {
       sourceContentHeight: 420,
       translationContentHeight: 380,
       workAreaHeight: WORK_AREA,
+      streaming: false,
     };
     const heights = new Set(
       [240, 320, 400, 480, 520, 700, 900].map(() => translateWindowHeight(sizing)),
@@ -100,8 +132,94 @@ describe("translateWindowHeight", () => {
         sourceContentHeight: 315,
         translationContentHeight: 9000,
         workAreaHeight: WORK_AREA,
+        streaming: false,
       }),
     ).toBe(CHROME_HEIGHT + 315 + 405);
+  });
+});
+
+describe("streaming", () => {
+  it("keeps one height while the translation streams in", () => {
+    const heights = new Set(
+      [0, 40, 120, 260, 300, 420, 900].map((partial) =>
+        translateWindowHeight({
+          sourceContentHeight: 300,
+          translationContentHeight: partial,
+          workAreaHeight: WORK_AREA,
+          streaming: true,
+        }),
+      ),
+    );
+    expect(heights.size).toBe(1);
+  });
+
+  it("sizes the window for the source while the translation streams in", () => {
+    expect(
+      translateWindowHeight({
+        sourceContentHeight: 300,
+        translationContentHeight: 0,
+        workAreaHeight: WORK_AREA,
+        streaming: true,
+      }),
+    ).toBe(CHROME_HEIGHT + 300 + 300);
+  });
+
+  it("corrects the height once the translation lands", () => {
+    const streaming = translateWindowHeight({
+      sourceContentHeight: 300,
+      translationContentHeight: 300,
+      workAreaHeight: WORK_AREA,
+      streaming: true,
+    });
+    const landed = translateWindowHeight({
+      sourceContentHeight: 300,
+      translationContentHeight: 260,
+      workAreaHeight: WORK_AREA,
+      streaming: false,
+    });
+    expect(landed).toBe(CHROME_HEIGHT + 300 + 260);
+    expect(landed).not.toBe(streaming);
+  });
+
+  it("asks the window for at most two heights over a whole translation", () => {
+    // The real sequence: the source lands, chunks arrive one by one, the
+    // translation lands. Every distinct height is one native resize.
+    const source = 300;
+    const heights: number[] = [];
+    const ask = (partial: number, streaming: boolean) => {
+      const height = translateWindowHeight({
+        sourceContentHeight: source,
+        translationContentHeight: partial,
+        workAreaHeight: WORK_AREA,
+        streaming,
+      });
+      if (heights[heights.length - 1] !== height) heights.push(height);
+    };
+
+    ask(0, true);
+    for (const partial of [10, 60, 120, 200, 260, 300, 300]) ask(partial, true);
+    ask(300, false);
+
+    expect(heights.length).toBeLessThanOrEqual(2);
+  });
+
+  it("asks for one height when the translation is as long as the source", () => {
+    // A long translation is capped at the pane's share of the work area, so
+    // the streaming height and the landed height coincide: nothing to correct.
+    const source = 9000;
+    const streaming = translateWindowHeight({
+      sourceContentHeight: source,
+      translationContentHeight: 0,
+      workAreaHeight: WORK_AREA,
+      streaming: true,
+    });
+    const landed = translateWindowHeight({
+      sourceContentHeight: source,
+      translationContentHeight: 9000,
+      workAreaHeight: WORK_AREA,
+      streaming: false,
+    });
+    expect(streaming).toBe(landed);
   });
 });
 
@@ -152,6 +270,7 @@ describe("the feedback loop this replaced", () => {
         sourceContentHeight: 9000,
         translationContentHeight: 9000,
         workAreaHeight: WORK_AREA,
+        streaming: false,
       }),
     ).toBe(CHROME_HEIGHT + 315 + 405);
   });
@@ -162,6 +281,7 @@ describe("the feedback loop this replaced", () => {
         sourceContentHeight: 9000,
         translationContentHeight: 9000,
         workAreaHeight,
+        streaming: false,
       });
       expect(height).toBeLessThanOrEqual(workAreaHeight);
     }

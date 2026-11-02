@@ -41,6 +41,16 @@ export interface TranslateWindowSizing {
   translationContentHeight: number;
   /** Usable height of the display the card appears on, in CSS pixels. */
   workAreaHeight: number;
+  /**
+   * True while the translation is still arriving.
+   *
+   * A streaming translation arrives in chunks, and each chunk made the card
+   * taller, so the window climbed one native resize at a time — the same
+   * staircase the feedback loop used to produce, only slower. While the
+   * translation streams in, the window is therefore sized for the room the
+   * *source* needs, and corrected once when the translation has landed.
+   */
+  streaming: boolean;
 }
 
 /**
@@ -64,6 +74,41 @@ export function paneCap(workAreaHeight: number, share: number): number {
   return workAreaHeight * share;
 }
 
+/** The height the source pane occupies: its text, capped to its share. */
+export function sourcePaneHeight(
+  contentHeight: number,
+  workAreaHeight: number,
+): number {
+  return paneHeight(contentHeight, workAreaHeight, SOURCE_AREA_SHARE);
+}
+
+/**
+ * The height the translation pane occupies.
+ *
+ * While the translation streams in, the pane is sized for the room the source
+ * needed — a translation runs about as long as the text it translates — and
+ * *not* for the text that has arrived so far. The streamed length is unknown
+ * until the last chunk lands, so tying the height to it would make the window
+ * grow one native resize per chunk: the same staircase as the feedback loop,
+ * only slower. Sizing for the source instead keeps one height for the whole
+ * translation.
+ *
+ * Once the translation has landed, the pane takes exactly the height its text
+ * needs, like the macOS app's `layoutWindow()`.
+ */
+export function translationPaneHeight(
+  contentHeight: number,
+  sourceContentHeight: number,
+  workAreaHeight: number,
+  streaming: boolean,
+): number {
+  const cap = paneCap(workAreaHeight, TRANSLATION_AREA_SHARE);
+  if (!Number.isFinite(cap) || cap <= 0) return 0;
+  const needed = streaming ? sourceContentHeight : contentHeight;
+  if (!Number.isFinite(needed) || needed <= 0) return 0;
+  return Math.min(needed, cap);
+}
+
 /**
  * The height the card should take for the given content.
  *
@@ -71,15 +116,12 @@ export function paneCap(workAreaHeight: number, share: number): number {
  * window's current height.
  */
 export function translateWindowHeight(sizing: TranslateWindowSizing): number {
-  const source = paneHeight(
+  const source = sourcePaneHeight(sizing.sourceContentHeight, sizing.workAreaHeight);
+  const translation = translationPaneHeight(
+    sizing.translationContentHeight,
     sizing.sourceContentHeight,
     sizing.workAreaHeight,
-    SOURCE_AREA_SHARE,
-  );
-  const translation = paneHeight(
-    sizing.translationContentHeight,
-    sizing.workAreaHeight,
-    TRANSLATION_AREA_SHARE,
+    sizing.streaming,
   );
   return Math.max(MIN_HEIGHT, Math.ceil(CHROME_HEIGHT + source + translation));
 }
