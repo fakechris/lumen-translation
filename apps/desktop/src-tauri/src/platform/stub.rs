@@ -85,10 +85,6 @@ pub mod clipboard {
 pub mod window_ext {
     use crate::platform::{Point, Rect};
 
-    pub fn cursor_position() -> Point {
-        Point::default()
-    }
-
     pub fn work_area_at(_p: Point) -> Rect {
         Rect {
             left: 0,

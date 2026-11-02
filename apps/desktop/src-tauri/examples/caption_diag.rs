@@ -4,12 +4,18 @@
 //!   cargo run --example caption_diag [-- <bundle-id> [<seconds>]]
 //!
 //! With no argument, taps the current frontmost app. Default window 8 s.
+//!
+//! The chain it exercises is macOS-only — it taps the system audio the
+//! live-subtitle path records — but `cargo clippy --all-targets` still has to
+//! compile this example on Windows, so the other platforms get a stub.
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
+/// The diagnostic itself: macOS only.
+#[cfg(target_os = "macos")]
 fn main() {
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
     // When launched via LaunchServices (`open`), stderr goes nowhere: re-exec
     // ourselves with stdout+stderr redirected to /tmp/caption_diag.log.
     if std::env::var_os("LUMEN_DIAG_REDIRECTED").is_none() {
@@ -138,4 +144,10 @@ fn main() {
         lumen_models::paraformer_streaming_ready(&dir)
     );
     eprintln!("done");
+}
+
+/// Everywhere else the diagnostic has nothing to tap.
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("caption_diag is macOS-only: it exercises the system audio tap");
 }

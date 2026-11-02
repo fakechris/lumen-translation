@@ -12,24 +12,11 @@ use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
+    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 use crate::platform::{Point, Rect};
-
-/// Current mouse position in physical screen pixels.
-pub fn cursor_position() -> Point {
-    let mut point = POINT::default();
-    // SAFETY: `point` is a valid out-parameter for the duration of the call.
-    if unsafe { GetCursorPos(&mut point) }.is_err() {
-        return Point::default();
-    }
-    Point {
-        x: point.x,
-        y: point.y,
-    }
-}
 
 /// Work area (screen minus taskbar and other appbars) of the monitor
 /// containing `p`. Falls back to a 1920x1080 origin-anchored rect if the

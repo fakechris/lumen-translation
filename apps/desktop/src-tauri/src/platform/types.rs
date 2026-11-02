@@ -18,14 +18,6 @@ pub struct Rect {
 }
 
 impl Rect {
-    pub fn width(&self) -> i32 {
-        self.right - self.left
-    }
-
-    pub fn height(&self) -> i32 {
-        self.bottom - self.top
-    }
-
     pub fn contains(&self, p: Point) -> bool {
         p.x >= self.left && p.x < self.right && p.y >= self.top && p.y < self.bottom
     }

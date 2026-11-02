@@ -1078,12 +1078,15 @@ pub fn run() {
                 })
                 .build(),
         )
-        .on_window_event(|window, event| {
+        // The handler only does something on macOS, so both parameters are
+        // unused elsewhere; the underscore keeps `cargo clippy -D warnings`
+        // quiet on Windows without a second cfg'd closure.
+        .on_window_event(|_window, _event| {
             #[cfg(target_os = "macos")]
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == WINDOW_CAPTION {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
+                if _window.label() == WINDOW_CAPTION {
                     api.prevent_close();
-                    let _ = live_subtitle_stop(window.app_handle().clone());
+                    let _ = live_subtitle_stop(_window.app_handle().clone());
                 }
             }
         })
