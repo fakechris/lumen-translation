@@ -21,11 +21,26 @@ import {
   type Settings,
 } from './settings';
 import { translate, TranslationFailed } from './translate';
+import {
+  CARD_WIDTH,
+  SOURCE_AREA_SHARE,
+  TRANSLATION_AREA_SHARE,
+  paneCap,
+  translateWindowHeight,
+} from './translate-window-sizing';
 
-const WIDTH = 400;
-/** 28 top + 12 + divider + 12 + 14 + 24 footer + 14 bottom. */
-const CHROME_HEIGHT = 105;
-const MIN_HEIGHT = 240;
+/** Geometry the card needs from the display it appears on. */
+interface WindowMetrics {
+  /** Usable height of that display, in CSS pixels. */
+  workAreaHeight: number;
+}
+
+/**
+ * How long the card's size waits for the content to settle before it is
+ * applied. A streaming translation arrives in chunks; without this the card
+ * would be resized once per chunk.
+ */
+const SIZE_COALESCE_MS = 120;
 
 interface Payload {
   source: string;
@@ -55,6 +70,10 @@ export function TranslateWindow() {
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const settingsReady = useRef<Promise<Settings> | null>(null);
+  // The card is capped to a share of the display's work area, so its height
+  // depends on the display rather than on the card. Loaded once.
+  const [metrics, setMetrics] = useState<WindowMetrics | null>(null);
+  const metricsReady = useRef<Promise<WindowMetrics> | null>(null);
 
   const applyLoadedSettings = useCallback((next: Settings) => {
     settingsRef.current = next;
@@ -70,6 +89,16 @@ export function TranslateWindow() {
     }
     return settingsReady.current;
   }, [applyLoadedSettings]);
+
+  const ensureMetrics = useCallback(() => {
+    if (!metricsReady.current) {
+      metricsReady.current = invoke<WindowMetrics>('translate_window_metrics').then((next) => {
+        setMetrics(next);
+        return next;
+      });
+    }
+    return metricsReady.current;
+  }, []);
 
   useEffect(() => {
     void ensureSettings().catch(console.error);
@@ -177,35 +206,71 @@ export function TranslateWindow() {
     };
   }, [hide]);
 
-  // Resize to fit: the panes are capped at a fraction of the work area so long
-  // text scrolls inside them instead of producing an unusably tall window.
-  // Rust owns the actual placement because it can read the monitor work area.
+  // Resize to fit: the panes are capped to a share of the display's work
+  // area, so long text scrolls inside them instead of producing an unusably
+  // tall window. Rust owns the actual placement because it can read the
+  // monitor work area.
+  //
+  // The panes are measured by their *content* height (`scrollHeight`), not by
+  // the capped height (`clientHeight`): the cap is a constant of the display,
+  // so the target height never depends on the card's current height. The old
+  // `vh` + `clientHeight` pairing made the target a function of the current
+  // height, and the card walked to its fixed point one native resize at a
+  // time — about twenty resizes per translation.
+  const applySize = useCallback(() => {
+    if (!metrics) return;
+    const height = translateWindowHeight({
+      sourceContentHeight: sourceRef.current?.scrollHeight ?? 0,
+      translationContentHeight: translationRef.current?.scrollHeight ?? 0,
+      workAreaHeight: metrics.workAreaHeight,
+    });
+    if (height === lastHeight.current) return;
+    lastHeight.current = height;
+    void invoke('place_translate_window', { width: CARD_WIDTH, height });
+  }, [metrics]);
+
+  // Resizing the native window costs a full webview re-layout and repaint, so
+  // the size is applied on the leading edge — the source text lands at once —
+  // and then coalesced. A streaming translation delivers a chunk every few tens
+  // of milliseconds, and resizing for each of them walks the window up in
+  // twenty steps while the text is still arriving.
+  const sizeTimer = useRef<number | null>(null);
+  const scheduleSize = useCallback(() => {
+    if (sizeTimer.current === null) {
+      applySize();
+      sizeTimer.current = window.setTimeout(() => {
+        sizeTimer.current = null;
+      }, SIZE_COALESCE_MS);
+      return;
+    }
+    window.clearTimeout(sizeTimer.current);
+    sizeTimer.current = window.setTimeout(() => {
+      sizeTimer.current = null;
+      applySize();
+    }, SIZE_COALESCE_MS);
+  }, [applySize]);
+
+  useEffect(
+    () => () => {
+      if (sizeTimer.current !== null) window.clearTimeout(sizeTimer.current);
+    },
+    [],
+  );
+
   useEffect(() => {
-    const card = cardRef.current;
-    if (!card) return;
-    const measure = () => {
-      const height = Math.max(
-        MIN_HEIGHT,
-        Math.ceil(
-          CHROME_HEIGHT +
-            (sourceRef.current?.clientHeight ?? 0) +
-            (translationRef.current?.clientHeight ?? 0),
-        ),
-      );
-      // Resizing the window changes the panes' box size, which fires the
-      // observer again. The measurement is content-based so it converges, but
-      // skipping the no-op keeps it to one round trip instead of two — and
-      // stops a rounding disagreement between here and Rust from ping-ponging.
-      if (height === lastHeight.current) return;
-      lastHeight.current = height;
-      void invoke('place_translate_window', { width: WIDTH, height });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
+    if (!metrics) {
+      void ensureMetrics().catch(console.error);
+      return;
+    }
+    scheduleSize();
+    // Late layout changes (a web font landing, for instance) can still alter
+    // the content height. Re-measuring is free: the height is only sent to
+    // Rust when it actually changed.
+    const ro = new ResizeObserver(() => scheduleSize());
     if (sourceRef.current) ro.observe(sourceRef.current);
     if (translationRef.current) ro.observe(translationRef.current);
     return () => ro.disconnect();
-  }, [payload.source, payload.translation]);
+  }, [payload.source, payload.translation, metrics, ensureMetrics, scheduleSize]);
 
   // Scrolling the source drives the translation proportionally; scrolling the
   // translation does not move the source (one-way, as on macOS).
@@ -247,7 +312,9 @@ export function TranslateWindow() {
         className="text-pane source"
         ref={sourceRef}
         onScroll={onSourceScroll}
-        style={{ maxHeight: '35vh' }}
+        style={
+          metrics ? { maxHeight: paneCap(metrics.workAreaHeight, SOURCE_AREA_SHARE) } : undefined
+        }
       >
         {payload.source}
       </div>
@@ -257,7 +324,11 @@ export function TranslateWindow() {
       <div
         className={`text-pane translation${payload.failed ? ' error' : ''}`}
         ref={translationRef}
-        style={{ maxHeight: '45vh' }}
+        style={
+          metrics
+            ? { maxHeight: paneCap(metrics.workAreaHeight, TRANSLATION_AREA_SHARE) }
+            : undefined
+        }
       >
         {payload.translation}
       </div>

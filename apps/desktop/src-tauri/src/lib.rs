@@ -205,38 +205,113 @@ fn set_engine_list(app: AppHandle, state: tauri::State<'_, AppState>, engines: V
     tray::refresh(&app, &TrayIconId::new(TRAY_ID));
 }
 
+/// Geometry the translate window needs to size itself, in CSS pixels.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateWindowMetrics {
+    /// Usable height of the display the card appears on, in CSS pixels.
+    pub work_area_height: f64,
+}
+
+/// The display the translate window should appear on.
+///
+/// The one under the cursor when it can be found, otherwise the display the
+/// window currently sits on, otherwise the primary one. Tauri's monitor list
+/// carries the real work area on every platform — including macOS, where the
+/// platform stubs answer with a hard-coded 1920x1080 and would place the card
+/// against a screen that does not exist.
+fn target_monitor(window: &WebviewWindow) -> Option<tauri::window::Monitor> {
+    let monitors = window.available_monitors().ok()?;
+    if monitors.is_empty() {
+        return None;
+    }
+    // The cursor is in the same coordinate space as the monitor origins:
+    // physical pixels, origin at the top-left of the primary display.
+    if let Ok(cursor) = window.cursor_position() {
+        for monitor in &monitors {
+            let origin = monitor.position();
+            let size = monitor.size();
+            let left = origin.x as f64;
+            let top = origin.y as f64;
+            if cursor.x >= left
+                && cursor.x < left + size.width as f64
+                && cursor.y >= top
+                && cursor.y < top + size.height as f64
+            {
+                return Some(monitor.clone());
+            }
+        }
+    }
+    window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+}
+
 /// Size and place the translation window for the content it now holds.
 ///
-/// Placement lives in Rust because Tauri's `Monitor` reports full display
-/// bounds; using them would put the window under the taskbar. Mirrors the
-/// macOS placement: horizontally centred, in the upper third of the work area.
+/// Placement lives in Rust because it is the side that can read the monitor
+/// work area. Mirrors the macOS placement: horizontally centred, in the upper
+/// third of the work area.
 #[tauri::command]
 fn place_translate_window(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     let Some(window) = app.get_webview_window(WINDOW_TRANSLATE) else {
         return Ok(());
     };
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let area = window_ext::work_area_at(window_ext::cursor_position());
+    let Some(monitor) = target_monitor(&window) else {
+        return Ok(());
+    };
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
 
     let physical_w = (width * scale).round() as i32;
     // Never taller than the work area, whatever the content measures.
-    let physical_h = ((height * scale).round() as i32).min(area.height() - 40);
+    let physical_h = ((height * scale).round() as i32).min(area.size.height as i32 - 40);
 
-    let origin = area.clamp(
-        Point {
-            x: area.left + (area.width() - physical_w) / 2,
-            y: area.top + (area.height() as f64 * 0.18) as i32,
-        },
-        physical_w,
-        physical_h,
-    );
+    // A resize that changes nothing still costs a full webview re-layout and
+    // repaint, so only touch the window when the geometry really differs.
+    let current = window.inner_size().unwrap_or_default();
+    if current.width as i32 != physical_w || current.height as i32 != physical_h {
+        window
+            .set_size(PhysicalSize::new(
+                physical_w.max(0) as u32,
+                physical_h.max(0) as u32,
+            ))
+            .map_err(|e| e.to_string())?;
+    }
 
-    window
-        .set_size(PhysicalSize::new(physical_w as u32, physical_h as u32))
-        .map_err(|e| e.to_string())?;
-    window
-        .set_position(PhysicalPosition::new(origin.x, origin.y))
-        .map_err(|e| e.to_string())
+    // Horizontally centred, in the upper third of the work area, and never
+    // hanging off the bottom of it.
+    let left = area.position.x;
+    let top = area.position.y;
+    let right = left + area.size.width as i32;
+    let bottom = top + area.size.height as i32;
+    let origin_x = (left + (right - physical_w) / 2).clamp(left, right - physical_w);
+    let origin_y = (top + area.size.height as i32 * 18 / 100)
+        .min(bottom - physical_h)
+        .max(top);
+    let current_pos = window.outer_position().unwrap_or_default();
+    if current_pos.x != origin_x || current_pos.y != origin_y {
+        window
+            .set_position(PhysicalPosition::new(origin_x, origin_y))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The geometry the card needs to size itself: the work area of the display
+/// it will appear on, in CSS pixels.
+#[tauri::command]
+fn translate_window_metrics(app: AppHandle) -> Result<TranslateWindowMetrics, String> {
+    let window = app
+        .get_webview_window(WINDOW_TRANSLATE)
+        .ok_or_else(|| "the translate window is not available".to_string())?;
+    let monitor = target_monitor(&window).ok_or_else(|| "no display is available".to_string())?;
+    let scale = monitor.scale_factor();
+    Ok(TranslateWindowMetrics {
+        work_area_height: monitor.work_area().size.height as f64 / scale,
+    })
 }
 
 /// Resolve the current selection and translate it. Invoked by the action bar,
@@ -319,14 +394,19 @@ fn show_translation(app: &AppHandle, text: &str) -> Result<(), String> {
         return Ok(());
     };
     *app.state::<AppState>().pending_translation.lock() = Some(text.to_string());
+    // Show before delivering. A webview that has never been on screen has not
+    // painted yet, so an event delivered into a hidden window is only picked
+    // up once the window appears — which is exactly when the user is looking
+    // at it. The pending-translation handshake already covers the race, so
+    // delivering after the show is safe.
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
     app.emit_to(
         WINDOW_TRANSLATE,
         "translate-text",
         serde_json::json!({ "text": text }),
     )
-    .map_err(|e| e.to_string())?;
-    window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())
 }
 
 fn hide_bar(app: &AppHandle) {
@@ -1010,6 +1090,7 @@ pub fn run() {
             save_settings,
             set_engine_list,
             place_translate_window,
+            translate_window_metrics,
             translate_selection,
             translate_clipboard,
             show_last,
