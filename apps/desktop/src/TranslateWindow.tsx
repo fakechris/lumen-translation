@@ -243,9 +243,14 @@ export function TranslateWindow() {
   // would resize the window once per chunk.
   const applySize = useCallback(() => {
     if (!metrics) return;
+    const sourceContentHeight = sourceRef.current?.scrollHeight ?? 0;
+    const translationContentHeight = translationRef.current?.scrollHeight ?? 0;
+    // Nothing to fit yet: leave the window at the geometry it was created
+    // with instead of resizing it to the minimum height for an empty card.
+    if (sourceContentHeight === 0 && translationContentHeight === 0) return;
     const height = translateWindowHeight({
-      sourceContentHeight: sourceRef.current?.scrollHeight ?? 0,
-      translationContentHeight: translationRef.current?.scrollHeight ?? 0,
+      sourceContentHeight,
+      translationContentHeight,
       workAreaHeight: metrics.workAreaHeight,
       streaming: payloadRef.current.streaming === true,
     });
