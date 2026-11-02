@@ -128,7 +128,7 @@ fn main() {
         );
         last = (c, s);
     }
-    let _ = capture.stop();
+    capture.stop();
 
     eprintln!("== step 6: streaming Paraformer model readiness ==");
     let dir = lumen_models::default_paraformer_streaming_dir();

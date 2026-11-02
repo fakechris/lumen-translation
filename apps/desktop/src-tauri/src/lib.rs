@@ -708,7 +708,9 @@ fn set_caption_clickthrough(app: AppHandle, clickthrough: bool) -> Result<(), St
     #[cfg(target_os = "macos")]
     {
         if let Some(window) = app.get_webview_window(WINDOW_CAPTION) {
-            window.set_ignore_cursor_events(clickthrough).map_err(|e| e.to_string())?;
+            window
+                .set_ignore_cursor_events(clickthrough)
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -1384,7 +1386,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                             log::error!("live subtitle toggle failed: {err}");
                         }
                         if let Some(tray) = app.tray_by_id(TRAY_ID) {
-                            tray::refresh(&app, &tray.id());
+                            tray::refresh(&app, tray.id());
                         }
                     });
                 }

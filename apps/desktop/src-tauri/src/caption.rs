@@ -325,7 +325,7 @@ impl Worker {
         // Stopping the tap first ends the sink callbacks; the workers then
         // drain what is left, flush trailing context, and exit.
         if let Ok(mut capture) = self.capture.lock() {
-            let _ = capture.stop();
+            capture.stop();
         }
         let _ = self.handle.take().map(JoinHandle::join);
         // MLX Whisper is a blocking subprocess call with a 60 s timeout. Its
@@ -352,6 +352,9 @@ fn chunk_rms(samples: &[f32]) -> f32 {
     (sum_sq / samples.len() as f32).sqrt()
 }
 
+// The recognizer thread takes one handle and one channel per stage; bundling
+// them into a struct would only move the same eight arguments around.
+#[allow(clippy::too_many_arguments)]
 fn run_worker(
     app: AppHandle,
     session_id: u64,
@@ -585,7 +588,9 @@ fn resolve_whisper_python() -> PathBuf {
         candidates.push(home.join(".local/bin/python3"));
         candidates.push(PathBuf::from("/opt/homebrew/bin/python3"));
         candidates.push(PathBuf::from("/usr/local/bin/python3"));
-        candidates.push(PathBuf::from("/opt/homebrew/Caskroom/miniconda/base/bin/python3"));
+        candidates.push(PathBuf::from(
+            "/opt/homebrew/Caskroom/miniconda/base/bin/python3",
+        ));
     }
 
     // Return the first candidate that actually has mlx_whisper installed
@@ -615,7 +620,10 @@ fn run_refine_worker(
     stop: Arc<AtomicBool>,
 ) {
     let python = resolve_whisper_python();
-    log::info!("MLX Whisper refine worker started using python: {}", python.display());
+    log::info!(
+        "MLX Whisper refine worker started using python: {}",
+        python.display()
+    );
     let engine = lumen_asr_engine::MlxWhisperAsr::new(lumen_asr_engine::MlxWhisperConfig::product(
         python,
         lumen_asr_engine::DEFAULT_MLX_WHISPER_MODEL,
@@ -678,7 +686,9 @@ fn clean_asr_text(text: &str) -> String {
     let mut cleaned = Vec::with_capacity(words.len());
     let mut prev_word_lower = String::new();
     for word in words {
-        let clean = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+        let clean = word
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
         if !clean.is_empty() && clean == prev_word_lower {
             continue;
         }
@@ -718,7 +728,8 @@ fn split_caption_pieces(text: &str) -> Vec<String> {
             let prev_digit = i > 0 && chars[i - 1].is_ascii_digit();
             let next_digit = i + 1 < len && chars[i + 1].is_ascii_digit();
             let is_decimal = prev_digit && next_digit;
-            let followed_by_space_or_end = i + 1 == len || chars[i + 1].is_whitespace() || matches!(chars[i + 1], '"' | '\'');
+            let followed_by_space_or_end =
+                i + 1 == len || chars[i + 1].is_whitespace() || matches!(chars[i + 1], '"' | '\'');
             !is_decimal && followed_by_space_or_end
         } else {
             false
@@ -820,12 +831,13 @@ pub fn load_streaming_recognizer() -> Result<lumen_asr_engine::StreamingRecogniz
             default_streaming_dir().display()
         )
     })?;
-    let paths = lumen_asr_engine::ParaformerStreamingModelPaths::discover(&streaming_dir).ok_or_else(|| {
-        format!(
-            "streaming Paraformer model files missing under {}",
-            streaming_dir.display()
-        )
-    })?;
+    let paths = lumen_asr_engine::ParaformerStreamingModelPaths::discover(&streaming_dir)
+        .ok_or_else(|| {
+            format!(
+                "streaming Paraformer model files missing under {}",
+                streaming_dir.display()
+            )
+        })?;
     let config = lumen_asr_engine::StreamingEndpointConfig {
         rule1_min_trailing_silence: 1.5,
         rule2_min_trailing_silence: 0.55,
@@ -910,7 +922,9 @@ mod tests {
 
     #[test]
     fn splits_english_sentences_naturally() {
-        let pieces = split_caption_pieces("Hello everyone, welcome! Today we will discuss Rust. Are you ready?");
+        let pieces = split_caption_pieces(
+            "Hello everyone, welcome! Today we will discuss Rust. Are you ready?",
+        );
         assert_eq!(
             pieces,
             vec![
