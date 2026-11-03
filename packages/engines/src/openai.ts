@@ -8,6 +8,7 @@ import type {
 } from "@lumen/core";
 import { TranslationError } from "@lumen/core";
 import { fetchWithRetry, type EngineFetchOptions } from "./fetch-utils.js";
+import { stripThinkingTags } from "./thinking.js";
 
 /**
  * OpenAI Chat Completions engine. Works with any OpenAI-compatible endpoint
@@ -29,12 +30,25 @@ export interface OpenAIEngineOptions {
   /** Max retries on 429/503 (default 3). */
   maxRetries?: number;
   /**
+   * Wall-clock budget for this engine's retries (default 1500 ms). Once spent,
+   * the response is handed back so the fallback chain can move on.
+   */
+  retryBudgetMs?: number;
+  /**
    * Extra JSON fields deep-merged into the chat request body (extra wins on
    * conflict). Used for provider-specific flags such as the catalog's
    * `quirks.no_thinking.body_params` (e.g. `{"thinking":{"type":"disabled"}}`
    * for MiniMax/DeepSeek or `{"enable_thinking":false}` for Qwen).
    */
   extraBody?: Record<string, unknown>;
+  /**
+   * Remove `<think>…</think>` reasoning blocks from the model's output.
+   *
+   * Required for providers whose "disable thinking" knob isn't supported
+   * (catalog `quirks.strip_thinking_tags`): without it the model's scratchpad
+   * is streamed into the user's translation pane.
+   */
+  stripThinkingTags?: boolean;
 }
 
 interface ChatChoice {
@@ -110,6 +124,7 @@ export function createOpenAIEngine(
     engineId: "openai",
     timeoutMs: opts.timeoutMs,
     maxRetries: opts.maxRetries,
+    retryBudgetMs: opts.retryBudgetMs,
   };
   return {
     id: "openai",
@@ -159,7 +174,8 @@ export function createOpenAIEngine(
         );
       }
       const json = (await res.json()) as ChatResponse;
-      const content = json.choices?.[0]?.message?.content ?? "";
+      const raw = json.choices?.[0]?.message?.content ?? "";
+      const content = opts.stripThinkingTags ? stripThinkingTags(raw) : raw;
       const parts = parseBatchResponse(content, segments);
       return { segments: parts };
     },
@@ -207,14 +223,23 @@ export function createOpenAIEngine(
         );
       }
       // Single-segment fast path: yield the growing translation as it arrives.
+      // With reasoning scrubbing on, the accumulated text is stripped on every
+      // chunk, so a half-written `<think>` block never reaches the caller.
+      // A *partial* opening tag is held back too: the provider can split
+      // "<think>" across deltas, and emitting the half-written tag would show
+      // reasoning markup in the pane for a moment.
+      const visible = (text: string): string =>
+        opts.stripThinkingTags
+          ? stripThinkingTags(text, { holdPartialTag: true }).trimStart()
+          : text;
       if (segments.length === 1) {
         const segId = segments[0].id;
         let acc = "";
         for await (const delta of sseDeltas(res.body)) {
           acc += delta;
-          yield { id: segId, text: acc };
+          yield { id: segId, text: visible(acc) };
         }
-        yield { id: segId, text: acc.trim() };
+        yield { id: segId, text: visible(acc).trim() };
         return;
       }
       // Multi-segment: stream incrementally. After each delta, re-parse the
@@ -226,7 +251,7 @@ export function createOpenAIEngine(
       let full = "";
       for await (const delta of sseDeltas(res.body)) {
         full += delta;
-        for (const part of parsePartialSegments(full, segments)) {
+        for (const part of parsePartialSegments(visible(full), segments)) {
           if (seen.get(part.id) !== part.text) {
             seen.set(part.id, part.text);
             yield { id: part.id, text: part.text };

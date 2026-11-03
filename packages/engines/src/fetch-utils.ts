@@ -17,6 +17,17 @@ export const MAX_RETRIES = 3;
 /** Base backoff delay (500 ms); multiplied by 2^attempt with jitter. */
 export const RETRY_BASE_MS = 500;
 
+/**
+ * Total time one engine may spend on retries before the caller gives up on it
+ * and moves to the next engine (1.5 s by default).
+ *
+ * A hotkey that waits 20 s for a rate-limited engine to give up is worse than
+ * one that tries the next engine after a second and a half. The budget is
+ * wall-clock for the whole engine call, so a slow response counts against it
+ * too.
+ */
+export const RETRY_BUDGET_MS = 1500;
+
 /** HTTP status codes that trigger an automatic retry. */
 export const RETRYABLE_STATUSES = new Set<number>([429, 503]);
 
@@ -31,13 +42,25 @@ export class EngineFetchError extends TranslationError {
   constructor(
     message: string,
     engineId: string,
-    public readonly kind: "timeout" | "aborted" | "http" | "network",
+    public readonly kind: "timeout" | "aborted" | "http" | "network" | "unavailable",
     public readonly status?: number,
     cause?: unknown,
   ) {
     super(message, engineId, cause);
     this.name = "EngineFetchError";
   }
+}
+
+/**
+ * True when the failure means "this engine cannot work at all", not "this
+ * request failed".
+ *
+ * Such a failure should not be retried, should not be retried by the fallback
+ * chain either, and must not leak a raw HTTP status into user-facing text —
+ * the user can do nothing about a dead upstream endpoint.
+ */
+export function isEngineUnavailable(err: unknown): boolean {
+  return err instanceof EngineFetchError && err.kind === "unavailable";
 }
 
 export interface EngineFetchOptions {
@@ -49,6 +72,12 @@ export interface EngineFetchOptions {
   maxRetries?: number;
   /** Base backoff in ms (default {@link RETRY_BASE_MS}). */
   retryBaseMs?: number;
+  /**
+   * Wall-clock budget for this engine's retries (default
+   * {@link RETRY_BUDGET_MS}). Once it is spent the response is handed back
+   * to the caller so the fallback chain can move on.
+   */
+  retryBudgetMs?: number;
   /** Optional external abort signal (e.g. caller cancellation). */
   abortSignal?: AbortSignal;
 }
@@ -109,6 +138,21 @@ function parseRetryAfter(value: string | null): number | undefined {
 }
 
 /**
+ * True when another attempt still fits in the engine's retry budget.
+ *
+ * The budget is wall-clock: it covers the requests already made *and* the
+ * wait before the next one, so a slow response eats into it.
+ */
+function withinBudget(
+  budgetMs: number,
+  startedAt: number,
+  waitMs: number,
+): boolean {
+  if (budgetMs <= 0) return false;
+  return Date.now() - startedAt + waitMs <= budgetMs;
+}
+
+/**
  * Fetch with timeout, abort, and bounded retry on 429/503. Honors the
  * `Retry-After` header when present.
  *
@@ -117,6 +161,16 @@ function parseRetryAfter(value: string | null): number | undefined {
  * - Retryable HTTP statuses (429 / 503) are retried with exponential backoff;
  *   if retries are exhausted the final response is returned to the caller so
  *   it can surface a provider-specific error body.
+ * - **A 429 without a `Retry-After` header is not retried.** The server is
+ *   rate-limiting this client and won't say when to come back; retrying only
+ *   burns the engine's budget, while the next engine in the fallback chain
+ *   would answer right away. The response is handed back so the caller can
+ *   move on.
+ * - Retries also stop once the engine's retry budget
+ *   ({@link EngineFetchOptions.retryBudgetMs}) is spent, for the same reason.
+ *   A retry additionally gets only the *remaining* budget as its timeout, so a
+ *   slow response cannot push the caller past the budget: the retry times
+ *   out and the fallback chain moves on.
  * - Non-retryable HTTP statuses (e.g. 400, 401, 404, 500) are returned
  *   unchanged; the caller is responsible for throwing on `!res.ok` and
  *   extracting any error body.
@@ -129,11 +183,24 @@ export async function fetchWithRetry(
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRetries = opts.maxRetries ?? MAX_RETRIES;
   const retryBaseMs = opts.retryBaseMs ?? RETRY_BASE_MS;
+  const retryBudgetMs = opts.retryBudgetMs ?? RETRY_BUDGET_MS;
   const engineId = opts.engineId;
+  const startedAt = Date.now();
 
   let attempt = 0;
   for (;;) {
-    const { signal, cleanup } = composeSignals(opts.abortSignal, timeoutMs);
+    // The first attempt gets the caller's full timeout. A *retry* only gets
+    // what is left of the engine's budget: a retry that starts inside the
+    // budget but runs for the full timeout would push the fallback chain far
+    // past `retryBudgetMs`, which is exactly the stall this budget exists to
+    // prevent. A retry that cannot finish inside the budget times out, and the
+    // caller moves on to the next engine.
+    const remainingMs = retryBudgetMs - (Date.now() - startedAt);
+    const attemptTimeoutMs =
+      attempt === 0
+        ? timeoutMs
+        : Math.max(1, Math.min(timeoutMs, remainingMs));
+    const { signal, cleanup } = composeSignals(opts.abortSignal, attemptTimeoutMs);
     let res: Response;
     try {
       res = await fetch(url, { ...init, signal });
@@ -144,7 +211,9 @@ export async function fetchWithRetry(
         const reason = signal?.reason;
         const isTimeout = reason instanceof Error && reason.message === "timeout";
         throw new EngineFetchError(
-          isTimeout ? `Request timed out after ${timeoutMs}ms` : "Request aborted",
+          isTimeout
+            ? `Request timed out after ${attemptTimeoutMs}ms`
+            : "Request aborted",
           engineId,
           isTimeout ? "timeout" : "aborted",
           undefined,
@@ -153,6 +222,15 @@ export async function fetchWithRetry(
       }
       if (attempt < maxRetries) {
         const backoff = retryBaseMs * 2 ** attempt + Math.random() * retryBaseMs;
+        if (!withinBudget(retryBudgetMs, startedAt, backoff)) {
+          throw new EngineFetchError(
+            `Network error: ${(err as Error).message}`,
+            engineId,
+            "network",
+            undefined,
+            err,
+          );
+        }
         await delay(backoff, opts.abortSignal).catch(() => undefined);
         attempt++;
         continue;
@@ -169,8 +247,18 @@ export async function fetchWithRetry(
 
     if (RETRYABLE_STATUSES.has(res.status) && attempt < maxRetries) {
       const retryAfter = parseRetryAfter(res.headers.get("Retry-After"));
+      // Rate-limited without a "come back at" hint: the server is throttling
+      // this client, and the next engine answers sooner than a retry would.
+      if (res.status === 429 && retryAfter === undefined) {
+        return res;
+      }
       const backoff =
         retryAfter ?? retryBaseMs * 2 ** attempt + Math.random() * retryBaseMs;
+      // The engine's budget is spent: hand the response back so the caller
+      // can fall over to the next engine instead of waiting longer here.
+      if (!withinBudget(retryBudgetMs, startedAt, backoff)) {
+        return res;
+      }
       // Free the response body before retrying to avoid leaking sockets.
       try {
         await res.body?.cancel();

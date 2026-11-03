@@ -233,3 +233,34 @@ describe("no_thinking quirk injection", () => {
     }
   });
 });
+
+describe("strip_thinking_tags quirk", () => {
+  it("exposes the quirk on the presets that need it", () => {
+    expect(getProviderPreset("minimax")?.stripThinkingTags).toBe(true);
+    expect(getProviderPreset("deepseek")?.stripThinkingTags).toBe(true);
+    expect(getProviderPreset("kimi")?.stripThinkingTags).toBe(false);
+  });
+
+  it("scrubs the reasoning block out of the provider's answer", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "<think>let me think</think>你好" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const engine = createProviderEngine("minimax", { apiKey: "k" });
+      const res = await engine!.translate({
+        pair: { source: "en", target: "zh" },
+        segments: [{ id: "1", text: "hello" }],
+      });
+      expect(res.segments[0].text).toBe("你好");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

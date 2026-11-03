@@ -1,16 +1,29 @@
-export { createGoogleEngine, type GoogleEngineOptions } from "./google.js";
-export { createMicrosoftEngine, type MicrosoftEngineOptions } from "./microsoft.js";
+export {
+  createGoogleEngine,
+  warmUpGoogleEngine,
+  GOOGLE_BROWSER_API_ENDPOINT,
+  GOOGLE_BROWSER_API_KEY,
+  type GoogleEngineOptions,
+} from "./google.js";
+export {
+  createMicrosoftEngine,
+  warmUpMicrosoftEngine,
+  type MicrosoftEngineOptions,
+} from "./microsoft.js";
 export { createDeepLEngine, type DeepLEngineOptions } from "./deepl.js";
 export { createOpenAIEngine, type OpenAIEngineOptions, sseDeltas, parsePartialSegments } from "./openai.js";
 export {
   fetchWithRetry,
   EngineFetchError,
+  isEngineUnavailable,
   DEFAULT_TIMEOUT_MS,
   MAX_RETRIES,
   RETRY_BASE_MS,
+  RETRY_BUDGET_MS,
   RETRYABLE_STATUSES,
   type EngineFetchOptions,
 } from "./fetch-utils.js";
+export { stripThinkingTags } from "./thinking.js";
 export { createOllamaEngine, type OllamaEngineOptions } from "./ollama.js";
 export {
   createProviderEngine,

@@ -20,7 +20,7 @@ import {
   onSettingsChanged,
   type Settings,
 } from './settings';
-import { translate, TranslationFailed } from './translate';
+import { translate, TranslationFailed, warmUpTranslationEngines } from './translate';
 import {
   CARD_WIDTH,
   SOURCE_AREA_SHARE,
@@ -123,6 +123,12 @@ export function TranslateWindow() {
       un.then((f) => f()).catch(() => undefined);
     };
   }, [applyLoadedSettings, ensureSettings]);
+
+  // Learn the free MT engines' endpoint state while the window sits idle, so
+  // the first hotkey translation doesn't pay a probe round trip.
+  useEffect(() => {
+    warmUpTranslationEngines();
+  }, []);
 
   // The tray's Engine submenu is rendered by Rust but populated from here: the
   // provider catalog is parsed once, in TypeScript, and this window is the one
