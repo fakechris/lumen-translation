@@ -19,6 +19,7 @@ import {
   createMicrosoftEngine,
   createOpenAIEngine,
   isEngineUnavailable,
+  warmUpGoogleEngine,
   warmUpMicrosoftEngine,
 } from '@lumen/engines';
 import { noThinkingInjection, type ProviderPreset } from './catalog';
@@ -251,12 +252,17 @@ function engineFor(preset: ProviderPreset, s: Settings): Engine {
   }
   switch (preset.apiStyle) {
     case 'google_translate':
-      // The engine appends its own query string, so hand it the bare path.
+      // The catalog still names the legacy `translate_a/single` path and must
+      // not be hand-edited; the engine rewrites it to the current
+      // `translate_a/t` endpoint by host + path. The engine appends its own
+      // query string, so hand it the bare path.
       return createGoogleEngine({
         endpoint: `${endpoint}?client=gtx&dt=t`,
         retryBudgetMs: ENGINE_RETRY_BUDGET_MS,
       });
     case 'microsoft_translator':
+      // Likewise: the catalog names the Azure Cognitive Translator API, and
+      // the engine maps it onto Edge's token-free endpoint.
       return createMicrosoftEngine({ endpoint, retryBudgetMs: ENGINE_RETRY_BUDGET_MS });
     default: {
       const model = modelFor(s, preset.id);
@@ -280,14 +286,15 @@ function engineFor(preset: ProviderPreset, s: Settings): Engine {
 /**
  * Probe the free MT engines once, ahead of the first user request.
  *
- * The Microsoft Edge auth endpoint answers 404 today; discovering that costs
- * a round trip (~0.7 s) that would otherwise sit on the critical path of the
- * first ⌥⌘K translation. Warming it up in the background lets the app learn
- * the endpoint state while the user is still reading, so the first real
- * request pays 0 ms.
+ * An endpoint's state (alive, rate-limited, or gone) is only knowable by
+ * asking it, and discovering that costs a round trip that would otherwise sit
+ * on the critical path of the first ⌥⌘K translation. Warming them up in the
+ * background lets the app learn the state while the user is still reading, so
+ * the first real request pays 0 ms — and the TLS connection is already warm.
  */
 export function warmUpTranslationEngines(): void {
   void warmUpMicrosoftEngine().catch(() => undefined);
+  void warmUpGoogleEngine().catch(() => undefined);
 }
 
 async function attemptOne(

@@ -1,25 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * The Microsoft Edge auth endpoint answers 404 today. That is a *permanent*
- * condition — the engine cannot work at all until the endpoint comes back — so
- * it must not be reported as a transient HTTP error, and it must not cost a
- * round trip on every translation.
+ * Edge's translation endpoint no longer needs a token: the auth endpoint was
+ * retired upstream (it answers 404), while the translation endpoint itself
+ * still serves requests — with a plain array of *strings* as the body.
  *
- * The engine memoizes a dead endpoint for ten minutes, so only the first call
- * pays for the probe. The tests below rely on that module-level state, hence
- * the fresh module registry for every test.
+ * The Azure Cognitive Translator API that the generated provider catalog names
+ * cannot serve this engine without a key of its own, so the engine maps it
+ * onto Edge's endpoint. These tests pin that mapping and the request shape,
+ * because a wrong body shape is answered with HTTP 400 and no explanation.
  */
 
-function mockResponse(status: number, body = ""): Response {
+function mockResponse(status: number, body: unknown = ""): Response {
+  const text = typeof body === "string" ? body : JSON.stringify(body);
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText: "mock",
-    text: () => Promise.resolve(body),
+    text: () => Promise.resolve(text),
     json: () => {
       try {
-        return Promise.resolve(body ? JSON.parse(body) : {});
+        return Promise.resolve(text ? JSON.parse(text) : {});
       } catch {
         return Promise.resolve({});
       }
@@ -28,11 +29,6 @@ function mockResponse(status: number, body = ""): Response {
     body: { cancel: () => Promise.resolve() },
   } as unknown as Response;
 }
-
-const request = {
-  pair: { source: "auto", target: "zh-CN" },
-  segments: [{ id: "s1", text: "hello" }],
-};
 
 /**
  * Fresh module instances for the engine *and* its error classes: the
@@ -45,7 +41,12 @@ async function freshModules() {
   return { ...microsoft, ...fetchUtils };
 }
 
-describe("createMicrosoftEngine with a dead Edge auth endpoint", () => {
+const request = {
+  pair: { source: "auto", target: "zh-CN" },
+  segments: [{ id: "s1", text: "hello" }],
+};
+
+describe("createMicrosoftEngine request shape", () => {
   const realFetch = globalThis.fetch;
   beforeEach(() => {
     // Fresh module state for every test: the dead-endpoint memo is
@@ -56,18 +57,131 @@ describe("createMicrosoftEngine with a dead Edge auth endpoint", () => {
     globalThis.fetch = realFetch;
   });
 
-  it("reports a 404 from the auth endpoint as an unavailable engine", async () => {
+  it("posts to the token-free Edge endpoint with a string array body", async () => {
+    const spy = vi.fn(async () =>
+      mockResponse(200, [
+        { detectedLanguage: { language: "en" }, translations: [{ text: "你好" }] },
+      ]),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const { createMicrosoftEngine } = await freshModules();
+    const res = await createMicrosoftEngine().translate(request);
+
+    expect(res.segments[0].text).toBe("你好");
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(url)).toContain(
+      "https://edge.microsoft.com/translate/translatetext?",
+    );
+    expect(String(url)).toContain("to=zh-Hans");
+    expect(String(url)).toContain("isEnterpriseClient=false");
+    // "auto" is the absence of a `from` parameter, not a literal value.
+    expect(String(url)).not.toContain("from=");
+    expect(init.method).toBe("POST");
+    // The body is an array of strings — `[{ "Text": "..." }]` is rejected
+    // upstream with HTTP 400.
+    expect(JSON.parse(String(init.body))).toEqual(["hello"]);
+  });
+
+  it("maps the Azure endpoint the catalog names onto Edge's endpoint", async () => {
+    const spy = vi.fn(async () =>
+      mockResponse(200, [{ translations: [{ text: "你好" }] }]),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const { createMicrosoftEngine } = await freshModules();
+    const eng = createMicrosoftEngine({
+      endpoint: "https://api.cognitive.microsofttranslator.com/translate",
+    });
+    await eng.translate(request);
+
+    const [url] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(url)).toContain("edge.microsoft.com/translate/translatetext");
+    expect(String(url)).not.toContain("cognitive");
+    expect(String(url)).not.toContain("api-version");
+  });
+
+  it("keeps a custom endpoint as given", async () => {
+    const spy = vi.fn(async () =>
+      mockResponse(200, [{ translations: [{ text: "你好" }] }]),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const { createMicrosoftEngine } = await freshModules();
+    const eng = createMicrosoftEngine({
+      endpoint: "https://proxy.example/translate",
+    });
+    await eng.translate(request);
+
+    const [url] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(url)).toContain("https://proxy.example/translate");
+  });
+
+  it("sends the source language when it is known", async () => {
+    const spy = vi.fn(async () =>
+      mockResponse(200, [{ translations: [{ text: "你好" }] }]),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const { createMicrosoftEngine } = await freshModules();
+    await createMicrosoftEngine().translate({
+      pair: { source: "en", target: "zh-TW" },
+      segments: [{ id: "s1", text: "hello" }],
+    });
+
+    const [url] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(url)).toContain("from=en");
+    expect(String(url)).toContain("to=zh-Hant");
+  });
+
+  it("translates every segment in one request", async () => {
+    const spy = vi.fn(async () =>
+      mockResponse(200, [
+        { translations: [{ text: "第一段" }] },
+        { translations: [{ text: "第二段" }] },
+      ]),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const { createMicrosoftEngine } = await freshModules();
+    const res = await createMicrosoftEngine().translate({
+      pair: { source: "auto", target: "zh-CN" },
+      segments: [
+        { id: "a", text: "one" },
+        { id: "b", text: "two" },
+      ],
+    });
+
+    expect(res.segments.map((s) => s.text)).toEqual(["第一段", "第二段"]);
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual(["one", "two"]);
+  });
+});
+
+describe("createMicrosoftEngine with a dead Edge endpoint", () => {
+  const realFetch = globalThis.fetch;
+  beforeEach(() => {
+    vi.resetModules();
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("reports a 404 as an unavailable engine", async () => {
     const spy = vi.fn(async () => mockResponse(404));
     globalThis.fetch = spy as unknown as typeof fetch;
 
-    const { createMicrosoftEngine, EngineFetchError, isEngineUnavailable } = await freshModules();
-    const eng = createMicrosoftEngine();
+    const { createMicrosoftEngine, EngineFetchError, isEngineUnavailable } =
+      await freshModules();
+    const err = await createMicrosoftEngine()
+      .translate(request)
+      .catch((e: unknown) => e);
 
-    const err = await eng.translate(request).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(EngineFetchError);
     expect((err as InstanceType<typeof EngineFetchError>).kind).toBe("unavailable");
     expect(isEngineUnavailable(err)).toBe(true);
-    // The translation endpoint was never reached.
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -89,14 +203,15 @@ describe("createMicrosoftEngine with a dead Edge auth endpoint", () => {
     expect(elapsed).toBeLessThan(50);
   });
 
-  it("treats a 410 from the auth endpoint the same way", async () => {
+  it("treats a 410 the same way", async () => {
     const spy = vi.fn(async () => mockResponse(410));
     globalThis.fetch = spy as unknown as typeof fetch;
 
     const { createMicrosoftEngine, isEngineUnavailable } = await freshModules();
-    const eng = createMicrosoftEngine();
+    const err = await createMicrosoftEngine()
+      .translate(request)
+      .catch((e: unknown) => e);
 
-    const err = await eng.translate(request).catch((e: unknown) => e);
     expect(isEngineUnavailable(err)).toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -125,11 +240,12 @@ describe("warmUpMicrosoftEngine", () => {
     globalThis.fetch = realFetch;
   });
 
-  it("caches a live token so the first translation skips the auth call", async () => {
-    const spy = vi.fn(async (url: string) =>
-      String(url).includes("edge.microsoft.com")
-        ? mockResponse(200, "edge-token")
-        : mockResponse(200, JSON.stringify([{ translations: [{ text: "你好" }] }])),
+  it("sends one probe request so the first translation does not pay for it", async () => {
+    const spy = vi.fn(async (_url: string, init?: RequestInit) =>
+      // The probe translates "a"; the real request translates "hello".
+      String(init?.body) === '["a"]'
+        ? mockResponse(200, [{ translations: [{ text: "a" }] }])
+        : mockResponse(200, [{ translations: [{ text: "你好" }] }]),
     );
     globalThis.fetch = spy as unknown as typeof fetch;
 
@@ -140,8 +256,8 @@ describe("warmUpMicrosoftEngine", () => {
     const res = await eng.translate(request);
 
     expect(res.segments[0].text).toBe("你好");
-    // One auth call (the warm-up) plus one translation call — the
-    // translation did not repeat the auth probe.
+    // One probe plus one translation — the translation did not repeat the
+    // probe.
     expect(spy).toHaveBeenCalledTimes(2);
   });
 });

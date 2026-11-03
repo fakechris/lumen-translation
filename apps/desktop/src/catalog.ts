@@ -128,13 +128,17 @@ function toPreset(p: CatalogProvider): ProviderPreset | undefined {
  * Last-resort presets if the vendored catalog is missing or corrupt (a build
  * error — it's bundled by Vite). Keeps the free, keyless engines working
  * instead of leaving the user with an empty provider list.
+ *
+ * These name the *current* upstream endpoints. The vendored catalog still
+ * lists the older ones (and must not be hand-edited); `@lumen/engines` rewrites
+ * those onto the endpoints below by host + path.
  */
 const FALLBACK_CATALOG: ProviderPreset[] = [
   {
     id: 'google_translate',
     label: 'Google 翻译（免费，无需 Key）',
     apiStyle: 'google_translate',
-    endpointCN: 'https://translate.googleapis.com/translate_a/single',
+    endpointCN: 'https://translate.googleapis.com/translate_a/t',
     defaultModel: 'gtx',
     models: ['gtx'],
     docsURL: 'https://translate.google.com',
@@ -146,7 +150,7 @@ const FALLBACK_CATALOG: ProviderPreset[] = [
     id: 'microsoft_translator',
     label: '微软翻译（免费，无需 Key）',
     apiStyle: 'microsoft_translator',
-    endpointCN: 'https://api.cognitive.microsofttranslator.com/translate',
+    endpointCN: 'https://edge.microsoft.com/translate/translatetext',
     defaultModel: 'free',
     models: ['free'],
     docsURL: 'https://www.bing.com/translator',
