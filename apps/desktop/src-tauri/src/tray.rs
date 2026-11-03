@@ -151,7 +151,11 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         menu = menu.item(&show_dock_icon);
     }
     menu = menu.item(&launch_at_login);
-    menu.separator().item(&preferences).separator().item(&quit).build()
+    menu.separator()
+        .item(&preferences)
+        .separator()
+        .item(&quit)
+        .build()
 }
 
 /// Re-render the tray menu, e.g. after the engine list or selection changed.

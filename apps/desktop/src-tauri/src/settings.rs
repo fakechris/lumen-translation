@@ -506,8 +506,14 @@ mod tests {
         use tauri_plugin_global_shortcut::Shortcut;
         let defaults = Settings::default();
         assert!(defaults.hotkey_show_last.parse::<Shortcut>().is_ok());
-        assert!(defaults.hotkey_translate_selection.parse::<Shortcut>().is_ok());
-        assert!(defaults.hotkey_translate_clipboard.parse::<Shortcut>().is_ok());
+        assert!(defaults
+            .hotkey_translate_selection
+            .parse::<Shortcut>()
+            .is_ok());
+        assert!(defaults
+            .hotkey_translate_clipboard
+            .parse::<Shortcut>()
+            .is_ok());
 
         assert!("Option+Command+L".parse::<Shortcut>().is_ok());
         assert!("Alt+Command+L".parse::<Shortcut>().is_ok());

@@ -6,13 +6,19 @@
 //! Usage:
 //!   cargo run --example caption_replay -- /path/to/audio.wav
 
-use lumen_asr_engine::{decode_wav_pcm_s16le, StreamingRecognizer};
+//! The recognizer crates are macOS-only dependencies, but `cargo clippy
+//! --all-targets` still has to compile this example on Windows, so the other
+//! platforms get a stub.
 
-const TARGET_RATE: u32 = 16_000;
-const CAPTURE_CHUNK: usize = 512;
-const CALLBACKS_PER_POLL: usize = 5;
-
+/// The replay itself: macOS only.
+#[cfg(target_os = "macos")]
 fn main() {
+    use lumen_asr_engine::{decode_wav_pcm_s16le, StreamingRecognizer};
+
+    const TARGET_RATE: u32 = 16_000;
+    const CAPTURE_CHUNK: usize = 512;
+    const CALLBACKS_PER_POLL: usize = 5;
+
     let path = std::env::args_os()
         .nth(1)
         .map(std::path::PathBuf::from)
@@ -59,4 +65,10 @@ fn main() {
         decoded.samples.len(),
         decoded.sample_rate,
     );
+}
+
+/// Everywhere else there is no recognizer to replay into.
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("caption_replay is macOS-only: it replays into the live-caption recognizer");
 }
