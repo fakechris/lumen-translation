@@ -191,3 +191,19 @@ describe('noThinkingInjection', () => {
     expect(noThinkingInjection(p, 'deepseek-chat')).toBeUndefined();
   });
 });
+
+describe('stripThinkingTags quirk', () => {
+  it('marks the reasoning providers that need their output scrubbed', () => {
+    // MiniMax / DeepSeek stream `<think>…</think>`; the translation pane must
+    // never show it. (The flag comes from the vendored catalog, so this test
+    // fails if the catalog and the app drift apart.)
+    expect(findProvider('minimax')?.stripThinkingTags).toBe(true);
+    expect(findProvider('deepseek')?.stripThinkingTags).toBe(true);
+  });
+
+  it('leaves providers that do not reason alone', () => {
+    expect(findProvider('openai')?.stripThinkingTags).toBe(false);
+    expect(findProvider('kimi')?.stripThinkingTags).toBe(false);
+    expect(findProvider('google_translate')?.stripThinkingTags).toBe(false);
+  });
+});

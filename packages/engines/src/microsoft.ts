@@ -12,6 +12,11 @@ export interface MicrosoftEngineOptions {
   timeoutMs?: number;
   /** Max retries on 429/503 (default 3). */
   maxRetries?: number;
+  /**
+   * Wall-clock budget for this engine's retries (default 1500 ms). Once spent,
+   * the response is handed back so the fallback chain can move on.
+   */
+  retryBudgetMs?: number;
 }
 
 interface MicrosoftTranslation {
@@ -27,6 +32,7 @@ export function createMicrosoftEngine(
     engineId: "microsoft",
     timeoutMs: opts.timeoutMs,
     maxRetries: opts.maxRetries,
+    retryBudgetMs: opts.retryBudgetMs,
   };
   return {
     id: "microsoft",
@@ -38,7 +44,7 @@ export function createMicrosoftEngine(
       if (segments.every((s) => s.text.trim().length === 0)) {
         return { segments: segments.map((s) => ({ id: s.id, text: s.text })) };
       }
-      const token = await fetchEdgeToken(opts.timeoutMs, opts.maxRetries);
+      const token = await fetchEdgeToken(opts.timeoutMs, opts.maxRetries, opts.retryBudgetMs);
       const url =
         `${endpoint}?api-version=3.0&to=${encodeURIComponent(pair.target)}` +
         (pair.source && pair.source !== "auto"
@@ -81,27 +87,87 @@ export function createMicrosoftEngine(
 
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
+/**
+ * The Edge auth endpoint is a moving target. When it disappears — it answers
+ * 404 today — every translation through this engine is impossible until it
+ * comes back, and no amount of retrying changes that.
+ *
+ * Remember it so the fallback chain doesn't pay the round trip again on every
+ * request. The flag expires so a returning endpoint is picked up again
+ * without restarting the app.
+ */
+let edgeAuthDownUntil = 0;
+
+/** How long a dead Edge auth endpoint is taken at face value. */
+const EDGE_AUTH_REPROBE_MS = 10 * 60 * 1000;
+
+const EDGE_AUTH_ENDPOINT = "https://edge.microsoft.com/translate/auth";
+
+/** The engine is unusable; the user can do nothing about a dead endpoint. */
+function edgeAuthUnavailable(status?: number): EngineFetchError {
+  return new EngineFetchError(
+    "Microsoft Translator is unavailable: its Edge auth endpoint is gone",
+    "microsoft",
+    "unavailable",
+    status,
+  );
+}
+
 async function fetchEdgeToken(
   timeoutMs?: number,
   maxRetries?: number,
+  retryBudgetMs?: number,
 ): Promise<string> {
   const now = Date.now();
   if (cachedToken && cachedToken.expiresAt > now + 60_000) {
     return cachedToken.value;
   }
+  // Known dead: fail immediately so the chain moves on instead of burning
+  // a round trip on every translation.
+  if (now < edgeAuthDownUntil) {
+    throw edgeAuthUnavailable();
+  }
   const res = await fetchWithRetry(
-    "https://edge.microsoft.com/translate/auth",
+    EDGE_AUTH_ENDPOINT,
     { method: "GET" },
-    { engineId: "microsoft", timeoutMs, maxRetries },
+    { engineId: "microsoft", timeoutMs, maxRetries, retryBudgetMs },
   );
+  if (res.status === 404 || res.status === 410) {
+    edgeAuthDownUntil = Date.now() + EDGE_AUTH_REPROBE_MS;
+    throw edgeAuthUnavailable(res.status);
+  }
   if (!res.ok) {
-    throw new TranslationError(
+    throw new EngineFetchError(
       `Failed to fetch Microsoft auth token: HTTP ${res.status}`,
       "microsoft",
+      "http",
+      res.status,
     );
   }
   const value = (await res.text()).trim();
   // Tokens last ~10 minutes; refresh early.
   cachedToken = { value, expiresAt: now + 8 * 60 * 1000 };
   return value;
+}
+
+/**
+ * Probe the Edge auth endpoint ahead of the first real request.
+ *
+ * The endpoint's state (alive, rate-limited, or gone) is only knowable by
+ * asking it. Doing that in the background means the first translation of the
+ * session starts with the answer already in hand — instead of paying the
+ * round trip while the user waits for the hotkey to produce text.
+ *
+ * Never throws: a failed probe just means the next request learns the state
+ * itself.
+ */
+export async function warmUpMicrosoftEngine(opts: MicrosoftEngineOptions = {}): Promise<void> {
+  const now = Date.now();
+  if (cachedToken && cachedToken.expiresAt > now + 60_000) return;
+  if (now < edgeAuthDownUntil) return;
+  try {
+    await fetchEdgeToken(opts.timeoutMs, opts.maxRetries, opts.retryBudgetMs);
+  } catch {
+    // The probe is best-effort; the failure mode is handled by the real call.
+  }
 }

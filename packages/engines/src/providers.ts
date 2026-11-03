@@ -122,6 +122,12 @@ export interface ProviderPreset {
     /** Case-insensitive substrings; inject only when the model matches. */
     modelFilter?: string[];
   };
+  /**
+   * From catalog `quirks.strip_thinking_tags`: the provider streams its
+   * reasoning inside `<think>…</think>`, so that block has to be removed
+   * before the text reaches the user.
+   */
+  stripThinkingTags?: boolean;
 }
 
 /**
@@ -169,6 +175,7 @@ function toPreset(p: CatalogProvider): ProviderPreset {
     region: p.region,
     aliases: p.aliases,
     noThinking,
+    stripThinkingTags: p.quirks?.strip_thinking_tags === true,
   };
 }
 
@@ -236,10 +243,20 @@ export interface ProviderEngineOptions {
   /** Max retries on 429/503 (default 3). */
   maxRetries?: number;
   /**
+   * Wall-clock budget for this engine's retries (default 1500 ms). Once spent,
+   * the response is handed back so the fallback chain can move on.
+   */
+  retryBudgetMs?: number;
+  /**
    * Inject the provider's `no_thinking` body params (from the catalog quirks)
    * to disable chain-of-thought output on reasoning models. Default true.
    */
   injectNoThinking?: boolean;
+  /**
+   * Force removal of `<think>…</think>` reasoning blocks from the output.
+   * Defaults to the preset's catalog quirk (`quirks.strip_thinking_tags`).
+   */
+  stripThinkingTags?: boolean;
 }
 
 /**
@@ -311,7 +328,12 @@ export function createProviderEngine(
     headers,
     timeoutMs: opts.timeoutMs,
     maxRetries: opts.maxRetries,
+    retryBudgetMs: opts.retryBudgetMs,
     extraBody,
+    // Catalog quirk wins; an explicit caller override can still force it on
+    // or off (e.g. a custom endpoint that streams reasoning under a
+    // different provider's id).
+    stripThinkingTags: opts.stripThinkingTags ?? preset.stripThinkingTags,
   };
   const engine = createOpenAIEngine(openaiOpts);
   return { ...engine, id: preset.id, label: preset.label };

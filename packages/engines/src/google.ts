@@ -23,6 +23,11 @@ export interface GoogleEngineOptions {
   timeoutMs?: number;
   /** Max retries on 429/503 (default 3). */
   maxRetries?: number;
+  /**
+   * Wall-clock budget for this engine's retries (default 1500 ms). Once spent,
+   * the response is handed back so the fallback chain can move on.
+   */
+  retryBudgetMs?: number;
 }
 
 /**
@@ -40,6 +45,7 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
     engineId: "google",
     timeoutMs: opts.timeoutMs,
     maxRetries: opts.maxRetries,
+    retryBudgetMs: opts.retryBudgetMs,
   };
   return {
     id: "google",
@@ -83,6 +89,17 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
           );
         }
         if (!res.ok) {
+          if (res.status === 404) {
+            // The free endpoint itself is gone. Nothing the user can do about
+            // it, and no amount of retrying brings it back — so the fallback
+            // chain should skip this engine instead of reporting a raw 404.
+            throw new EngineFetchError(
+              "Google Translate endpoint is unavailable",
+              "google",
+              "unavailable",
+              res.status,
+            );
+          }
           throw new EngineFetchError(`Google HTTP ${res.status}`, "google", "http", res.status);
         }
         const json = (await res.json()) as GoogleRpcResponse;

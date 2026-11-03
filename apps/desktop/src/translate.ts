@@ -14,7 +14,13 @@
  */
 
 import type { Engine } from '@lumen/core';
-import { createGoogleEngine, createMicrosoftEngine, createOpenAIEngine } from '@lumen/engines';
+import {
+  createGoogleEngine,
+  createMicrosoftEngine,
+  createOpenAIEngine,
+  isEngineUnavailable,
+  warmUpMicrosoftEngine,
+} from '@lumen/engines';
 import { noThinkingInjection, type ProviderPreset } from './catalog';
 import { langLabel } from './lang';
 import {
@@ -57,6 +63,19 @@ do not comment on it.
 or a preamble.`;
 
 const TEMPERATURE = 0.3;
+
+/**
+ * Wall-clock budget for a single engine's retries before the fallback chain
+ * moves on to the next provider.
+ *
+ * A hotkey that waits 20 s for a rate-limited engine to give up is worse than
+ * one that tries the next engine after a second and a half. The budget is
+ * wall-clock for the whole engine call, so a slow response counts against it
+ * too. Change it here (or pass `retryBudgetMs` to an engine directly) to tune
+ * the trade-off between "give the first engine a second chance" and "answer
+ * fast".
+ */
+export const ENGINE_RETRY_BUDGET_MS = 1500;
 
 /**
  * Long selections are split into order-preserving chunks of at most
@@ -235,9 +254,10 @@ function engineFor(preset: ProviderPreset, s: Settings): Engine {
       // The engine appends its own query string, so hand it the bare path.
       return createGoogleEngine({
         endpoint: `${endpoint}?client=gtx&dt=t`,
+        retryBudgetMs: ENGINE_RETRY_BUDGET_MS,
       });
     case 'microsoft_translator':
-      return createMicrosoftEngine({ endpoint });
+      return createMicrosoftEngine({ endpoint, retryBudgetMs: ENGINE_RETRY_BUDGET_MS });
     default: {
       const model = modelFor(s, preset.id);
       return createOpenAIEngine({
@@ -248,9 +268,26 @@ function engineFor(preset: ProviderPreset, s: Settings): Engine {
         systemPrompt: buildSystemPrompt(s.sourceLang, s.targetLang),
         headers: preset.extraHeaders,
         extraBody: noThinkingInjection(preset, model),
+        // Reasoning models that ignore the "disable thinking" body param still
+        // stream `<think>…</think>`; that block must never reach the pane.
+        stripThinkingTags: preset.stripThinkingTags === true,
+        retryBudgetMs: ENGINE_RETRY_BUDGET_MS,
       });
     }
   }
+}
+
+/**
+ * Probe the free MT engines once, ahead of the first user request.
+ *
+ * The Microsoft Edge auth endpoint answers 404 today; discovering that costs
+ * a round trip (~0.7 s) that would otherwise sit on the critical path of the
+ * first ⌥⌘K translation. Warming it up in the background lets the app learn
+ * the endpoint state while the user is still reading, so the first real
+ * request pays 0 ms.
+ */
+export function warmUpTranslationEngines(): void {
+  void warmUpMicrosoftEngine().catch(() => undefined);
 }
 
 async function attemptOne(
@@ -319,6 +356,7 @@ export async function translate(
   const truncated = text.length > s.maxSelectionChars ? text.slice(0, s.maxSelectionChars) : text;
   const chunks = chunkText(truncated);
   let lastError = 'no translation provider available';
+  let unavailableCount = 0;
 
   for (const preset of chain) {
     if (opts.signal?.aborted) throw new TranslationFailed('aborted');
@@ -327,9 +365,23 @@ export async function translate(
       return { translation, engine: preset.label };
     } catch (err) {
       if (opts.signal?.aborted) throw new TranslationFailed('aborted');
+      if (isEngineUnavailable(err)) {
+        // The engine itself is dead (e.g. its auth endpoint is gone). Retrying
+        // it is pointless, and a raw HTTP status would only confuse the user —
+        // they can do nothing about a vanished upstream endpoint. So it never
+        // becomes the reported error; the chain simply moves on.
+        unavailableCount++;
+        console.warn(`[lumen] ${preset.id} is unavailable; trying next provider`, err);
+        continue;
+      }
       lastError = `${preset.label}: ${(err as Error).message}`;
       console.warn(`[lumen] ${preset.id} failed; trying next provider`, err);
     }
+  }
+  if (unavailableCount > 0 && lastError === 'no translation provider available') {
+    // Every engine we tried was unavailable: report a neutral, actionable
+    // message instead of the raw upstream status.
+    lastError = 'no translation service is currently available';
   }
   throw new TranslationFailed(lastError);
 }

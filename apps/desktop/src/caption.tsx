@@ -32,6 +32,7 @@ import {
   translate,
   TranslationFailed,
   TranslationFlightController,
+  warmUpTranslationEngines,
   type TranslateContext,
 } from './translate';
 
@@ -340,6 +341,12 @@ function CaptionOverlay() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Learn the free MT engines' endpoint state while the window sits idle, so
+  // the first caption translation doesn't pay a probe round trip.
+  useEffect(() => {
+    warmUpTranslationEngines();
   }, []);
 
   const handleClose = () => {

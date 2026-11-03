@@ -37,6 +37,12 @@ export interface ProviderPreset {
   /** From catalog `quirks.no_thinking` — body params that disable CoT output. */
   noThinkingBodyParams?: Record<string, unknown>;
   noThinkingModelFilter?: string[];
+  /**
+   * From catalog `quirks.strip_thinking_tags` — the provider streams its
+   * reasoning inside `<think>…</think>`, which must be removed before the
+   * text reaches the translation pane.
+   */
+  stripThinkingTags?: boolean;
 }
 
 /**
@@ -114,6 +120,7 @@ function toPreset(p: CatalogProvider): ProviderPreset | undefined {
     aliases: p.aliases ?? [],
     noThinkingBodyParams: noThinking?.body_params,
     noThinkingModelFilter: noThinking?.model_filter,
+    stripThinkingTags: p.quirks?.strip_thinking_tags === true,
   };
 }
 
