@@ -87,6 +87,21 @@ function resolveEndpoint(raw: string | undefined): string {
 }
 
 /**
+ * True when the engine talks to Edge's own endpoint.
+ *
+ * Only then does the "endpoint is gone" memo apply: a 404 from somebody
+ * else's proxy says nothing about Edge, and letting it disable the engine
+ * process-wide would take down the instances that still work.
+ */
+function isEdgeEndpoint(endpoint: string): boolean {
+  try {
+    return new URL(endpoint).hostname === new URL(EDGE_ENDPOINT).hostname;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The Edge endpoint is a moving target. When it disappears, every translation
  * through this engine is impossible until it comes back, and no amount of
  * retrying changes that.
@@ -114,6 +129,7 @@ export function createMicrosoftEngine(
   opts: MicrosoftEngineOptions = {},
 ): Engine {
   const endpoint = resolveEndpoint(opts.endpoint);
+  const isEdge = isEdgeEndpoint(endpoint);
   const fetchOpts = {
     engineId: "microsoft",
     timeoutMs: opts.timeoutMs,
@@ -141,7 +157,7 @@ export function createMicrosoftEngine(
     pair: EngineRequest["pair"],
     texts: string[],
   ): Promise<MicrosoftTranslation[]> {
-    if (Date.now() < edgeDownUntil) {
+    if (isEdge && Date.now() < edgeDownUntil) {
       throw edgeUnavailable();
     }
     const { url, body } = buildRequest(pair, texts);
@@ -158,7 +174,9 @@ export function createMicrosoftEngine(
       fetchOpts,
     );
     if (res.status === 404 || res.status === 410) {
-      edgeDownUntil = Date.now() + EDGE_REPROBE_MS;
+      // Only Edge's own endpoint is worth remembering: a 404 from a custom
+      // proxy says nothing about the endpoint everyone else uses.
+      if (isEdge) edgeDownUntil = Date.now() + EDGE_REPROBE_MS;
       throw edgeUnavailable(res.status);
     }
     if (!res.ok) {

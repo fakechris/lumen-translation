@@ -113,6 +113,62 @@ describe("createGoogleEngine request shape", () => {
     expect(init.method).toBe("GET");
     expect(String(url)).toContain("q=hello");
   });
+
+  it("does not forward a custom endpoint's text to Google's browser API", async () => {
+    // The caller pointed the engine at their own proxy. If the primary request
+    // fails, the text must not silently leave for Google instead.
+    const spy = vi.fn(async (_url: string) => mockResponse(429));
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const { createGoogleEngine } = await freshGoogle();
+    const eng = createGoogleEngine({
+      endpoint: "https://proxy.example/translate_a/single?client=gtx&dt=t",
+    });
+    await eng.translate(request).catch(() => undefined);
+
+    const urls = spy.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("translate-pa.googleapis.com"))).toBe(false);
+    expect(urls.every((u) => u.includes("proxy.example"))).toBe(true);
+  });
+
+  it("splits a custom GET endpoint's batches so the URL stays short", async () => {
+    // The legacy GET contract carries the text in the query string, where
+    // browsers and proxies enforce a much shorter limit than a request body.
+    const SEP = "\n\n@@@\n\n";
+    const spy = vi.fn(async (url: string) => {
+      const q = new URL(String(url)).searchParams.get("q") ?? "";
+      const translated = q
+        .split(SEP)
+        .map((part) => `译:${part}`)
+        .join(SEP);
+      return mockResponse(200, [[[translated, q, null, null, 1]], null, "en"]);
+    });
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const { createGoogleEngine } = await freshGoogle();
+    const eng = createGoogleEngine({
+      endpoint: "https://proxy.example/translate_a/single?client=gtx&dt=t",
+    });
+    const long = "x".repeat(1200);
+    const res = await eng.translate({
+      pair: { source: "auto", target: "zh-CN" },
+      segments: [
+        { id: "a", text: long },
+        { id: "b", text: long },
+        { id: "c", text: long },
+      ],
+    });
+
+    expect(spy.mock.calls.length).toBeGreaterThan(1);
+    for (const call of spy.mock.calls) {
+      expect(String(call[0]).length).toBeLessThanOrEqual(2000);
+    }
+    expect(res.segments.map((s) => s.text)).toEqual([
+      `译:${long}`,
+      `译:${long}`,
+      `译:${long}`,
+    ]);
+  });
 });
 
 describe("createGoogleEngine response shapes", () => {

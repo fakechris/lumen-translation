@@ -60,6 +60,14 @@ const SEGMENT_SEPARATOR = "\n\n@@@\n\n";
  */
 const MAX_BATCH_CHARS = 4000;
 
+/**
+ * URL length limit for the legacy GET contract.
+ *
+ * Browsers and proxies typically enforce ~2k char limits on GET URLs; the
+ * text rides in the query string there, so a long batch has to be split.
+ */
+const MAX_GET_URL_LENGTH = 2000;
+
 /** Query params supported by the free google translate endpoint. */
 type GoogleRpcResponse = unknown;
 
@@ -91,6 +99,14 @@ interface ResolvedEndpoint {
   /** Base URL, without the per-request `sl` / `tl` query. */
   base: string;
   method: "GET" | "POST";
+  /**
+   * True when the endpoint is Google's own host.
+   *
+   * Only then may the browser-API fallback be used: a caller who configured
+   * their own endpoint (a self-hosted proxy, say) expects the text to stay
+   * there, and silently forwarding it to Google would break that promise.
+   */
+  googleHosted: boolean;
 }
 
 /**
@@ -107,10 +123,10 @@ function resolveEndpoint(raw: string | undefined): ResolvedEndpoint {
     url = new URL(endpoint);
   } catch {
     // A malformed custom endpoint: keep it as given and let the request fail.
-    return { base: endpoint, method: "GET" };
+    return { base: endpoint, method: "GET", googleHosted: false };
   }
   if (url.hostname !== GOOGLE_HOST) {
-    return { base: endpoint, method: "GET" };
+    return { base: endpoint, method: "GET", googleHosted: false };
   }
   if (url.pathname.endsWith(LEGACY_SINGLE_PATH)) {
     url.pathname =
@@ -120,7 +136,7 @@ function resolveEndpoint(raw: string | undefined): ResolvedEndpoint {
   // does not carry them, so make sure they are there.
   if (!url.searchParams.has("client")) url.searchParams.set("client", "gtx");
   if (!url.searchParams.has("dt")) url.searchParams.set("dt", "t");
-  return { base: url.toString(), method: "POST" };
+  return { base: url.toString(), method: "POST", googleHosted: true };
 }
 
 /**
@@ -195,6 +211,10 @@ function unavailable(status?: number): EngineFetchError {
 export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
   const endpoint = resolveEndpoint(opts.endpoint);
   const browserApiKey = opts.browserApiKey ?? GOOGLE_BROWSER_API_KEY;
+  // The browser-API fallback talks to Google directly. A caller who pointed
+  // the engine at their own endpoint asked for the text to go there and
+  // nowhere else, so the fallback stays off for them.
+  const allowBrowserFallback = endpoint.googleHosted;
   const fetchOpts = {
     engineId: "google",
     timeoutMs: opts.timeoutMs,
@@ -303,7 +323,7 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
       return out;
     };
 
-    if (browserApiPreferred) {
+    if (allowBrowserFallback && browserApiPreferred) {
       try {
         return restore(await requestBrowserApi(liveTexts, sl, tl));
       } catch (err) {
@@ -326,6 +346,7 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
       return restore(parts);
     } catch (err) {
       if (isCancellation(err)) throw err;
+      if (!allowBrowserFallback) throw err;
       try {
         const rows = await requestBrowserApi(liveTexts, sl, tl);
         browserApiPreferred = true;
@@ -336,6 +357,25 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
         throw err;
       }
     }
+  }
+
+  /**
+   * Whether a batch still fits the endpoint's request limits.
+   *
+   * The POST path carries the text in the body, so the limit is the source
+   * size. The GET path carries it in the query string, where browsers and
+   * proxies enforce a much shorter limit — that one still has to be split.
+   */
+  function fitsBatch(texts: string[], sl: string, tl: string): boolean {
+    const joined = texts.join(SEGMENT_SEPARATOR);
+    if (endpoint.method === "POST") return joined.length <= MAX_BATCH_CHARS;
+    const url = new URL(endpoint.base);
+    url.searchParams.set("sl", sl);
+    url.searchParams.set("tl", tl);
+    const full = `${url.toString()}${
+      url.search ? "&" : "?"
+    }q=${encodeURIComponent(joined)}`;
+    return full.length <= MAX_GET_URL_LENGTH;
   }
 
   return {
@@ -352,14 +392,11 @@ export function createGoogleEngine(opts: GoogleEngineOptions = {}): Engine {
       const sl = pair.source === "auto" ? "auto" : pair.source;
       const tl = pair.target;
       for (let i = 0; i < segments.length; ) {
-        // Batch by source size: the primary path is a POST, so the old URL
-        // length limit is gone, but a modest request still answers faster.
-        let chars = 0;
+        // Batch so each request stays inside the endpoint's limits.
         let count = 0;
         while (i + count < segments.length) {
-          const next = segments[i + count].text.length;
-          if (count > 0 && chars + next > MAX_BATCH_CHARS) break;
-          chars += next;
+          const candidate = segments.slice(i, i + count + 1).map((s) => s.text);
+          if (count > 0 && !fitsBatch(candidate, sl, tl)) break;
           count++;
         }
         const batch = segments.slice(i, i + count);

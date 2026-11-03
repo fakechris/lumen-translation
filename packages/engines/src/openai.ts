@@ -225,8 +225,13 @@ export function createOpenAIEngine(
       // Single-segment fast path: yield the growing translation as it arrives.
       // With reasoning scrubbing on, the accumulated text is stripped on every
       // chunk, so a half-written `<think>` block never reaches the caller.
+      // A *partial* opening tag is held back too: the provider can split
+      // "<think>" across deltas, and emitting the half-written tag would show
+      // reasoning markup in the pane for a moment.
       const visible = (text: string): string =>
-        opts.stripThinkingTags ? stripThinkingTags(text).trimStart() : text;
+        opts.stripThinkingTags
+          ? stripThinkingTags(text, { holdPartialTag: true }).trimStart()
+          : text;
       if (segments.length === 1) {
         const segId = segments[0].id;
         let acc = "";

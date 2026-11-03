@@ -203,6 +203,27 @@ describe("createMicrosoftEngine with a dead Edge endpoint", () => {
     expect(elapsed).toBeLessThan(50);
   });
 
+  it("does not let a custom endpoint's 404 disable the Edge endpoint", async () => {
+    // A 404 from somebody else's proxy says nothing about Edge's endpoint, so
+    // it must not disable the engine process-wide.
+    const spy = vi.fn(async (url: string) =>
+      String(url).includes("proxy.example")
+        ? mockResponse(404)
+        : mockResponse(200, [{ translations: [{ text: "你好" }] }]),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const { createMicrosoftEngine, isEngineUnavailable } = await freshModules();
+    const custom = createMicrosoftEngine({ endpoint: "https://proxy.example/translate" });
+    const err = await custom.translate(request).catch((e: unknown) => e);
+    expect(isEngineUnavailable(err)).toBe(true);
+
+    // The Edge endpoint still answers.
+    const edge = createMicrosoftEngine();
+    const res = await edge.translate(request);
+    expect(res.segments[0].text).toBe("你好");
+  });
+
   it("treats a 410 the same way", async () => {
     const spy = vi.fn(async () => mockResponse(410));
     globalThis.fetch = spy as unknown as typeof fetch;

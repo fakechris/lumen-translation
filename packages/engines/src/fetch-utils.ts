@@ -168,6 +168,9 @@ function withinBudget(
  *   move on.
  * - Retries also stop once the engine's retry budget
  *   ({@link EngineFetchOptions.retryBudgetMs}) is spent, for the same reason.
+ *   A retry additionally gets only the *remaining* budget as its timeout, so a
+ *   slow response cannot push the caller past the budget: the retry times
+ *   out and the fallback chain moves on.
  * - Non-retryable HTTP statuses (e.g. 400, 401, 404, 500) are returned
  *   unchanged; the caller is responsible for throwing on `!res.ok` and
  *   extracting any error body.
@@ -186,7 +189,18 @@ export async function fetchWithRetry(
 
   let attempt = 0;
   for (;;) {
-    const { signal, cleanup } = composeSignals(opts.abortSignal, timeoutMs);
+    // The first attempt gets the caller's full timeout. A *retry* only gets
+    // what is left of the engine's budget: a retry that starts inside the
+    // budget but runs for the full timeout would push the fallback chain far
+    // past `retryBudgetMs`, which is exactly the stall this budget exists to
+    // prevent. A retry that cannot finish inside the budget times out, and the
+    // caller moves on to the next engine.
+    const remainingMs = retryBudgetMs - (Date.now() - startedAt);
+    const attemptTimeoutMs =
+      attempt === 0
+        ? timeoutMs
+        : Math.max(1, Math.min(timeoutMs, remainingMs));
+    const { signal, cleanup } = composeSignals(opts.abortSignal, attemptTimeoutMs);
     let res: Response;
     try {
       res = await fetch(url, { ...init, signal });
@@ -197,7 +211,9 @@ export async function fetchWithRetry(
         const reason = signal?.reason;
         const isTimeout = reason instanceof Error && reason.message === "timeout";
         throw new EngineFetchError(
-          isTimeout ? `Request timed out after ${timeoutMs}ms` : "Request aborted",
+          isTimeout
+            ? `Request timed out after ${attemptTimeoutMs}ms`
+            : "Request aborted",
           engineId,
           isTimeout ? "timeout" : "aborted",
           undefined,

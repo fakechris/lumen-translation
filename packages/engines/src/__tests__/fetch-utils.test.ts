@@ -116,6 +116,57 @@ describe("fetchWithRetry", () => {
     expect(RETRY_BUDGET_MS).toBeGreaterThan(0);
     expect(RETRY_BUDGET_MS).toBeLessThanOrEqual(5000);
   });
+
+  it("caps a retry at the remaining budget instead of the full timeout", async () => {
+    // The budget is wall-clock for the whole engine call. A retry that starts
+    // inside the budget but runs for the full 30 s timeout would hold the
+    // fallback chain hostage long after the budget was spent, so the retry
+    // only gets what is left — and times out when that runs out.
+    const spy = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (spy.mock.calls.length === 1) {
+        // Retryable, and the server says "come back right away".
+        return mockResponse({ status: 503, headers: { "Retry-After": "0" } });
+      }
+      // The retry hangs — only the request's own timeout can end it.
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason), {
+          once: true,
+        });
+      });
+    });
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const startedAt = Date.now();
+    const err = await fetchWithRetry(
+      "https://example.test/t",
+      {},
+      { engineId: "google", timeoutMs: 30_000, retryBudgetMs: 200, maxRetries: 3 },
+    ).catch((e: unknown) => e);
+
+    const elapsed = Date.now() - startedAt;
+    expect(err).toBeInstanceOf(EngineFetchError);
+    expect((err as InstanceType<typeof EngineFetchError>).kind).toBe("timeout");
+    // Not the caller's 30 s timeout: the engine gave up inside its budget.
+    expect(elapsed).toBeLessThan(2000);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the first attempt on the caller's full timeout", async () => {
+    const spy = vi.fn(async () => mockResponse({ status: 503 }));
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    // A budget smaller than the timeout must not shrink the first attempt:
+    // a slow-but-successful engine still gets its full timeout.
+    const startedAt = Date.now();
+    await fetchWithRetry(
+      "https://example.test/t",
+      {},
+      { engineId: "google", timeoutMs: 30_000, retryBudgetMs: 0 },
+    ).catch(() => undefined);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+  });
 });
 
 describe("isEngineUnavailable", () => {

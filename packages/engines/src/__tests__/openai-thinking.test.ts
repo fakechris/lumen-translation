@@ -97,6 +97,34 @@ describe("createOpenAIEngine reasoning scrubbing", () => {
     expect(chunks[chunks.length - 1]).toBe("你好");
   });
 
+  it("holds back a partial opening tag split across deltas", async () => {
+    // The provider can split "<think>" across content deltas. The half-written
+    // tag must not reach the pane: it is held back until later content shows
+    // whether it completes the tag.
+    globalThis.fetch = vi.fn(async () =>
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"<thi"}}]}\n',
+        'data: {"choices":[{"delta":{"content":"nk>reasoning"}}]}\n',
+        'data: {"choices":[{"delta":{"content":"</think>你好"}}]}\n',
+        "data: [DONE]\n",
+      ]),
+    ) as unknown as typeof fetch;
+
+    const eng = createOpenAIEngine({ stripThinkingTags: true });
+    const chunks: string[] = [];
+    for await (const seg of eng.translateStream!(request)) {
+      chunks.push(seg.text);
+    }
+
+    for (const chunk of chunks) {
+      expect(chunk).not.toContain("<thi");
+      expect(chunk).not.toContain("<think>");
+      expect(chunk).not.toContain("</think>");
+      expect(chunk).not.toContain("reasoning");
+    }
+    expect(chunks[chunks.length - 1]).toBe("你好");
+  });
+
   it("strips the reasoning block from a streamed multi-segment answer", async () => {
     globalThis.fetch = vi.fn(async () =>
       sseResponse([

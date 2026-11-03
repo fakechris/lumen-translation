@@ -46,4 +46,31 @@ describe("stripThinkingTags", () => {
     const once = stripThinkingTags("<think>x</think>hello");
     expect(stripThinkingTags(once)).toBe(once);
   });
+
+  it("keeps a partial opening tag by default", () => {
+    // Without the hold-back, the caller asked for a plain text transform and
+    // gets one: nothing is invented, nothing is dropped.
+    expect(stripThinkingTags("<thi")).toBe("<thi");
+    expect(stripThinkingTags("visible<thi")).toBe("visible<thi");
+  });
+
+  it("holds back a partial opening tag when asked to", () => {
+    // A provider can split "<think>" across deltas. The half-written tag is
+    // withheld until later content shows whether it completes the tag.
+    expect(stripThinkingTags("<thi", { holdPartialTag: true })).toBe("");
+    expect(stripThinkingTags("visible<thi", { holdPartialTag: true })).toBe("visible");
+    expect(stripThinkingTags("<THINK", { holdPartialTag: true })).toBe("");
+  });
+
+  it("leaves ordinary angle brackets alone when holding back", () => {
+    // A lone "<" is ordinary text, and so is "a < b".
+    expect(stripThinkingTags("a < b", { holdPartialTag: true })).toBe("a < b");
+    expect(stripThinkingTags("x<", { holdPartialTag: true })).toBe("x<");
+    expect(stripThinkingTags("<thought>", { holdPartialTag: true })).toBe("<thought>");
+  });
+
+  it("still drops a completed reasoning block while holding back", () => {
+    expect(stripThinkingTags("<think>a</think>你好", { holdPartialTag: true })).toBe("你好");
+    expect(stripThinkingTags("<think>still going", { holdPartialTag: true })).toBe("");
+  });
 });
